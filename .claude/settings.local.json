@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main -type f -name *.json -o -name *.js -o -name *.ts -o -name *.tsx -o -name *.jsx -o -name *.html -o -name *.css -o -name *.md)",
+      "Bash(find /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main -not -path */node_modules/* -not -path */.git/* -not -path */dist/* -type f)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(sqlite3 data/planning.db \"SELECT id, label, start_date, end_date, status FROM planning_periods ORDER BY created_at ASC;\")",
+      "Bash(sqlite3 data/planning.db \".schema planning_periods\")",
+      "Bash(sqlite3 data/planning.db \"SELECT COUNT\\(*\\) FROM planning_periods\")",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT COUNT\\(*\\) as slots FROM slots WHERE period_id = ''2b1df557-ddce-4173-b5f7-7a6686acb1b5'';\")",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT date, type, label FROM slots WHERE period_id = ''2b1df557-ddce-4173-b5f7-7a6686acb1b5'' AND type = ''Permanence'' AND label LIKE ''%\\(%\\)%'' ORDER BY date;\")",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT date, type, label FROM slots WHERE period_id = ''2b1df557-ddce-4173-b5f7-7a6686acb1b5'' AND date >= ''2026-12-01'' ORDER BY date;\")",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT * FROM closed_days;\")",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT date, type, label FROM slots WHERE period_id = ''2b1df557-ddce-4173-b5f7-7a6686acb1b5'' AND date IN \\(''2026-12-25'', ''2027-01-01''\\);\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(chmod +x /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/scripts/backup.sh)"
+    ]
+  }
+}
