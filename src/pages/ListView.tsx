@@ -31,9 +31,8 @@ export default function ListView() {
   }, [activePeriod]);
 
   const assignedCadres = useMemo(() => {
-    const ids = new Set(slots.filter(s => s.cadreId).map(s => s.cadreId));
-    return cadres.filter(c => ids.has(c.id!)).sort((a, b) => a.name.localeCompare(b.name));
-  }, [slots, cadres]);
+    return cadres.filter(c => c.active).sort((a, b) => a.name.localeCompare(b.name));
+  }, [cadres]);
 
   const filteredSlots = useMemo(() => {
     let result = slots;
