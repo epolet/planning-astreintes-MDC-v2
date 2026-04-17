@@ -95,6 +95,21 @@ export function generatePermanenceSlots(
 /** Hard cap: a cadre cannot receive more than this many astreinte weeks per year */
 export const MAX_ASTREINTES_PER_YEAR = 4;
 
+/** Annual caps for permanences */
+const MAX_PERM_PER_YEAR       = 6;
+const MAX_DIFF_PERM_PER_YEAR  = 4;  // D2+ (assez difficile et au-dessus)
+const DIFFICULT_PERM_MIN_DIFF = 2;  // seuil "difficile" : D2 et au-dessus
+
+/** Compute prorated caps for a given period duration (in days).
+ *  Reference = 365 days. Rounds to nearest integer, minimum 1. */
+function proratedCaps(periodDays: number): { maxPerm: number; maxDiffPerm: number } {
+  const ratio = periodDays / 365;
+  return {
+    maxPerm:     Math.max(1, Math.round(MAX_PERM_PER_YEAR     * ratio)),
+    maxDiffPerm: Math.max(1, Math.round(MAX_DIFF_PERM_PER_YEAR * ratio)),
+  };
+}
+
 // ─── autoAssignSlots helpers ──────────────────────────────────────────────────
 
 /**
@@ -219,12 +234,17 @@ function assignAstreinteSlots(
  * - No alternation: the cadre gets whatever slot they volunteered for.
  * - If they wished for both Saturday AND Sunday, Saturday is preferred.
  * - If they wished for neither, nothing is assigned (slot falls through to Pass 3).
+ * - Respects per-period caps (total permanences & difficult permanences).
  */
 function pairAstreinteWithWeekend(
   astreinteSlots: Slot[],
   permanenceSlots: Slot[],
   countersP: Map<string, number[]>,
-  wishes: Map<string, string[]>
+  wishes: Map<string, string[]>,
+  sessionPermCount: Map<string, number>,
+  sessionDiffPermCount: Map<string, number>,
+  maxPerm: number,
+  maxDiffPerm: number,
 ): void {
   for (const aSlot of astreinteSlots) {
     if (!aSlot.cadreId) continue;
@@ -247,6 +267,12 @@ function pairAstreinteWithWeekend(
     const targetSlot = wantsSat ? satSlot : wantsSun ? sunSlot : null;
     if (!targetSlot) continue;
 
+    // Check per-period caps
+    const permCount     = sessionPermCount.get(cadreId)     ?? 0;
+    const diffPermCount = sessionDiffPermCount.get(cadreId) ?? 0;
+    if (permCount >= maxPerm) continue;
+    if (targetSlot.difficulty >= DIFFICULT_PERM_MIN_DIFF && diffPermCount >= maxDiffPerm) continue;
+
     targetSlot.cadreId   = cadreId;
     targetSlot.cadreName = aSlot.cadreName;
     targetSlot.status    = 'auto';
@@ -254,6 +280,11 @@ function pairAstreinteWithWeekend(
     const arr = countersP.get(cadreId) ?? [0, 0, 0, 0, 0];
     arr[targetSlot.difficulty - 1]++;
     countersP.set(cadreId, arr);
+
+    sessionPermCount.set(cadreId, permCount + 1);
+    if (targetSlot.difficulty >= DIFFICULT_PERM_MIN_DIFF) {
+      sessionDiffPermCount.set(cadreId, diffPermCount + 1);
+    }
   }
 }
 
@@ -262,6 +293,8 @@ function pairAstreinteWithWeekend(
  * cadres, prioritising equity (fewest D4/D3/D2/D1 first) while avoiding
  * consecutive days and astreinte-week conflicts.
  * - If wishes are provided for a slot, only volunteers are eligible.
+ * - Respects per-period caps (total permanences & difficult permanences).
+ * - Prefers cadres who haven't yet had this difficulty level (diversity).
  */
 function assignRemainingPermanence(
   permanenceSlots: Slot[],
@@ -269,7 +302,11 @@ function assignRemainingPermanence(
   countersA: Map<string, number[]>,
   countersP: Map<string, number[]>,
   astreinteAssignedWeeks: Map<string, string[]>,
-  wishes: Map<string, string[]>
+  wishes: Map<string, string[]>,
+  sessionPermCount: Map<string, number>,
+  sessionDiffPermCount: Map<string, number>,
+  maxPerm: number,
+  maxDiffPerm: number,
 ): void {
   const remaining = permanenceSlots
     .filter(s => !s.cadreId)
@@ -286,6 +323,16 @@ function assignRemainingPermanence(
       const filtered = eligible.filter(c => volunteered.has(c.id!));
       if (filtered.length > 0) eligible = filtered;
       else { slot.cadreId = null; slot.cadreName = ''; continue; }
+    }
+
+    // Cap total permanences per period
+    const belowPermCap = eligible.filter(c => (sessionPermCount.get(c.id!) ?? 0) < maxPerm);
+    if (belowPermCap.length > 0) eligible = belowPermCap;
+
+    // Cap difficult permanences per period (D2+)
+    if (slot.difficulty >= DIFFICULT_PERM_MIN_DIFF) {
+      const belowDiffCap = eligible.filter(c => (sessionDiffPermCount.get(c.id!) ?? 0) < maxDiffPerm);
+      if (belowDiffCap.length > 0) eligible = belowDiffCap;
     }
 
     // Avoid consecutive days
@@ -312,7 +359,14 @@ function assignRemainingPermanence(
     if (eligible.length === 0) eligible = [...activeCadres];
     if (eligible.length === 0) continue;
 
-    eligible.sort((a, b) => compareByCounts(a, b, countersP, countersA));
+    eligible.sort((a, b) => {
+      // Diversity: prefer cadres who haven't had this difficulty level yet in session
+      const aHasDiff = (countersP.get(a.id!) ?? [0,0,0,0,0])[slot.difficulty - 1] === 0;
+      const bHasDiff = (countersP.get(b.id!) ?? [0,0,0,0,0])[slot.difficulty - 1] === 0;
+      if (aHasDiff !== bHasDiff) return aHasDiff ? -1 : 1; // prefer cadre without this diff
+      // Then equity by cumulative counters
+      return compareByCounts(a, b, countersP, countersA);
+    });
 
     const chosen = eligible[0];
     slot.cadreId = chosen.id!;
@@ -324,6 +378,14 @@ function assignRemainingPermanence(
     countersP.set(chosen.id!, arr);
 
     lastAssigned.set(chosen.id!, slot.date);
+
+    // Update session counters
+    const prev = sessionPermCount.get(chosen.id!) ?? 0;
+    sessionPermCount.set(chosen.id!, prev + 1);
+    if (slot.difficulty >= DIFFICULT_PERM_MIN_DIFF) {
+      const prevDiff = sessionDiffPermCount.get(chosen.id!) ?? 0;
+      sessionDiffPermCount.set(chosen.id!, prevDiff + 1);
+    }
   }
 }
 
@@ -339,12 +401,14 @@ export type PassOptions = {
 };
 
 /**
- * @param wishes   Map<slotId, cadreId[]> — cadres who expressed a wish for each slot.
+ * @param wishes       Map<slotId, cadreId[]> — cadres who expressed a wish for each slot.
  *   If empty/absent, all eligible cadres are candidates (fallback behaviour).
  *   If wishes are configured but NO permanence slot has wishes, Passes 2 & 3
  *   are skipped so that only astreinte slots get assigned.
- * @param passes   Which passes to execute. Defaults to all three.
+ * @param passes       Which passes to execute. Defaults to all three.
  *   When Pass 1 is skipped, astreinteAssignedWeeks is derived from existing slot state.
+ * @param periodStart  ISO date string — start of the planning period (for prorated caps).
+ * @param periodEnd    ISO date string — end of the planning period (for prorated caps).
  */
 export function autoAssignSlots(
   slots: Slot[],
@@ -352,14 +416,26 @@ export function autoAssignSlots(
   vacations: VacationPeriod[],
   zone: string,
   wishes: Map<string, string[]> = new Map(),
-  passes: PassOptions = {}
+  passes: PassOptions = {},
+  periodStart?: string,
+  periodEnd?: string,
 ): Slot[] {
   const runPass1 = passes.astreintes ?? true;
   const runPass2 = passes.weekends   ?? true;
   const runPass3 = passes.permanences ?? true;
 
+  // Prorated permanence caps based on period duration
+  const periodDays = (periodStart && periodEnd)
+    ? (parseISO(periodEnd).getTime() - parseISO(periodStart).getTime()) / 86_400_000
+    : 182; // fallback: ~6 months
+  const { maxPerm, maxDiffPerm } = proratedCaps(periodDays);
+
   const activeCadres = cadres.filter(c => c.active);
   const astreinteCadres = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
+
+  // Session counters for permanence caps (reset each autoAssign run)
+  const sessionPermCount     = new Map<string, number>();
+  const sessionDiffPermCount = new Map<string, number>();
 
   const astreinteSlots = slots
     .filter(s => s.type === 'astreinte')
@@ -395,10 +471,16 @@ export function autoAssignSlots(
   const permPassesAllowed = !wishesConfigured || hasPermanenceWishes;
 
   if (runPass2 && permPassesAllowed) {
-    pairAstreinteWithWeekend(astreinteSlots, permanenceSlots, countersP, wishes);
+    pairAstreinteWithWeekend(
+      astreinteSlots, permanenceSlots, countersP, wishes,
+      sessionPermCount, sessionDiffPermCount, maxPerm, maxDiffPerm,
+    );
   }
   if (runPass3 && permPassesAllowed) {
-    assignRemainingPermanence(permanenceSlots, activeCadres, countersA, countersP, astreinteAssignedWeeks, wishes);
+    assignRemainingPermanence(
+      permanenceSlots, activeCadres, countersA, countersP, astreinteAssignedWeeks, wishes,
+      sessionPermCount, sessionDiffPermCount, maxPerm, maxDiffPerm,
+    );
   }
 
   return [...astreinteSlots, ...permanenceSlots].sort((a, b) => a.date.localeCompare(b.date));

@@ -15,7 +15,8 @@
       "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT * FROM closed_days;\")",
       "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT date, type, label FROM slots WHERE period_id = ''2b1df557-ddce-4173-b5f7-7a6686acb1b5'' AND date IN \\(''2026-12-25'', ''2027-01-01''\\);\")",
       "Bash(echo \"exit: $?\")",
-      "Bash(chmod +x /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/scripts/backup.sh)"
+      "Bash(chmod +x /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/scripts/backup.sh)",
+      "Bash(sqlite3 /Users/emmanuelpolet/Documents/Pro/mdc/planning-astreintes-mdc-main/data/planning.db \"SELECT nom, prenom, role FROM cadres WHERE role = 'Astreinte';\")"
     ]
   }
 }

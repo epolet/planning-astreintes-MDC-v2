@@ -248,13 +248,14 @@ function RecommendationsPanel({ cadre, astreinteCadres, activeCadres }: Recommen
 
 // ── Misc helpers ───────────────────────────────────────────────────────────
 
-/** Score pondéré cumulatif : D1×1 … D5×5 sur astreintes + permanences.
- *  Permet de classer en tête les cadres ayant pris le plus de créneaux difficiles. */
-function cumulativeWeightedScore(c: Cadre): number {
-  return (
-    c.astreinteD1  * 1 + c.astreinteD2  * 2 + c.astreinteD3  * 3 + c.astreinteD4  * 4 + c.astreinteD5  * 5 +
-    c.permanenceD1 * 1 + c.permanenceD2 * 2 + c.permanenceD3 * 3 + c.permanenceD4 * 4 + c.permanenceD5 * 5
-  );
+/** Score pondéré astreintes uniquement : D1×1 … D5×5 */
+function astreinteWeightedScore(c: Cadre): number {
+  return c.astreinteD1 * 1 + c.astreinteD2 * 2 + c.astreinteD3 * 3 + c.astreinteD4 * 4 + c.astreinteD5 * 5;
+}
+
+/** Score pondéré permanences uniquement : D1×1 … D5×5 */
+function permanenceWeightedScore(c: Cadre): number {
+  return c.permanenceD1 * 1 + c.permanenceD2 * 2 + c.permanenceD3 * 3 + c.permanenceD4 * 4 + c.permanenceD5 * 5;
 }
 
 function CadreCell({ value, color }: { value: number; color: string }) {
@@ -308,10 +309,22 @@ export default function EquityRecap() {
   const astreinteSlots = cadreSlots.filter(s => s.type === 'astreinte');
   const permanenceSlots = cadreSlots.filter(s => s.type === 'permanence');
 
-  const sorted = [...activeCadres].sort(
-    (a, b) =>
-      cumulativeWeightedScore(b) - cumulativeWeightedScore(a) ||
-      (totalAstreintes(b) + totalPermanences(b)) - (totalAstreintes(a) + totalPermanences(a))
+  // Cadres hors pool astreinte classique (permanence uniquement) — suivis pour Noël uniquement
+  const permanenceOnlyCadres = activeCadres.filter(c => c.role === 'permanence');
+
+  // Tri astreintes : total DESC, puis score pondéré DESC à égalité
+  const sortedAst = [...astreinteCadres].sort(
+    (a, b) => totalAstreintes(b) - totalAstreintes(a) || astreinteWeightedScore(b) - astreinteWeightedScore(a)
+  );
+
+  // Tri sous-section Noël : par astreinteD5 DESC uniquement
+  const sortedNoelOnly = [...permanenceOnlyCadres].sort(
+    (a, b) => b.astreinteD5 - a.astreinteD5
+  );
+
+  // Tri permanences : total DESC, puis score pondéré DESC à égalité
+  const sortedPerm = [...activeCadres].sort(
+    (a, b) => totalPermanences(b) - totalPermanences(a) || permanenceWeightedScore(b) - permanenceWeightedScore(a)
   );
 
   // ── Evolution data ─────────────────────────────────────────────────────
@@ -361,116 +374,193 @@ export default function EquityRecap() {
         </p>
       </div>
 
-      {/* ─── Summary table ──────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr>
-                <th
-                  rowSpan={2}
-                  className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-white border-b border-r border-slate-200 sticky left-0 z-10"
-                >
-                  Cadre
-                </th>
-                <th
-                  colSpan={6}
-                  className="text-center py-2.5 text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 border-b border-blue-200 border-r-2 border-r-slate-300"
-                >
-                  📅 Astreintes (semaines)
-                </th>
-                <th
-                  colSpan={6}
-                  className="text-center py-2.5 text-xs font-bold text-teal-700 uppercase tracking-wider bg-teal-50 border-b border-teal-200"
-                >
-                  🗓 Permanences (jours)
-                </th>
-              </tr>
-              <tr className="border-b-2 border-slate-200">
-                {ASTREINTE_COLS.map((col, i) => (
-                  <th
-                    key={`ah-${col.key}`}
-                    className={`text-center px-2 py-2 text-xs font-semibold min-w-[52px] ${col.bg} ${col.text} ${
-                      i === ASTREINTE_COLS.length - 1 ? 'border-r-2 border-slate-300' : ''
-                    }`}
-                  >
-                    {col.label}
-                  </th>
-                ))}
-                {PERMANENCE_COLS.map(col => (
-                  <th
-                    key={`ph-${col.key}`}
-                    className={`text-center px-2 py-2 text-xs font-semibold min-w-[52px] ${col.bg} ${col.text}`}
-                  >
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {sorted.map(cadre => {
-                const isSelected = selectedCadreId === cadre.id;
-                const rowBase = isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'bg-white hover:bg-slate-50';
-                return (
-                  <tr
-                    key={cadre.id}
-                    onClick={() => setSelectedCadreId(cadre.id ?? null)}
-                    className={`cursor-pointer transition-colors ${rowBase}`}
-                  >
-                    <td className={`px-4 py-2.5 font-medium text-slate-900 border-r border-slate-100 sticky left-0 z-10 ${isSelected ? 'bg-blue-50' : 'bg-white'}`}>
-                      {cadre.name}
-                    </td>
+      {/* ─── Summary tables (two side-by-side) ─────────────────────────── */}
+      <div className="grid grid-cols-2 gap-4">
 
-                    {/* Astreinte cells */}
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-purple-50/40">
-                      <CadreCell value={cadre.astreinteD5} color="text-purple-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-red-50/40">
-                      <CadreCell value={cadre.astreinteD4} color="text-red-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-orange-50/40">
-                      <CadreCell value={cadre.astreinteD3} color="text-orange-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-amber-50/40">
-                      <CadreCell value={cadre.astreinteD2} color="text-amber-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-slate-50/60">
-                      <CadreCell value={cadre.astreinteD1} color="text-slate-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums font-bold text-blue-700 bg-blue-100/60 border-r-2 border-slate-200">
-                      {totalAstreintes(cadre)}
-                    </td>
+        {/* ── Tableau Astreintes ── */}
+        <div className="rounded-xl border border-blue-200 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr>
+                  <th
+                    rowSpan={2}
+                    className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-white border-b border-r border-slate-200 sticky left-0 z-10"
+                  >
+                    Cadre
+                  </th>
+                  <th
+                    colSpan={6}
+                    className="text-center py-2.5 text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 border-b border-blue-200"
+                  >
+                    📅 Astreintes (semaines)
+                  </th>
+                </tr>
+                <tr className="border-b-2 border-blue-200">
+                  {ASTREINTE_COLS.map(col => (
+                    <th
+                      key={`ah-${col.key}`}
+                      className={`text-center px-2 py-2 text-xs font-semibold min-w-[44px] ${col.bg} ${col.text}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedAst.map(cadre => {
+                  const isSelected = selectedCadreId === cadre.id;
+                  const rowBase = isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'bg-white hover:bg-slate-50';
+                  return (
+                    <tr
+                      key={cadre.id}
+                      onClick={() => setSelectedCadreId(cadre.id ?? null)}
+                      className={`cursor-pointer transition-colors ${rowBase}`}
+                    >
+                      <td className={`px-3 py-2.5 font-medium text-slate-900 border-r border-slate-100 sticky left-0 z-10 ${isSelected ? 'bg-blue-50' : 'bg-white'}`}>
+                        {cadre.name}
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-purple-50/40">
+                        <CadreCell value={cadre.astreinteD5} color="text-purple-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-red-50/40">
+                        <CadreCell value={cadre.astreinteD4} color="text-red-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-orange-50/40">
+                        <CadreCell value={cadre.astreinteD3} color="text-orange-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-amber-50/40">
+                        <CadreCell value={cadre.astreinteD2} color="text-amber-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-slate-50/60">
+                        <CadreCell value={cadre.astreinteD1} color="text-slate-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums font-bold text-blue-700 bg-blue-100/60">
+                        {totalAstreintes(cadre)}
+                      </td>
+                    </tr>
+                  );
+                })}
 
-                    {/* Permanence cells */}
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-purple-50/40">
-                      <CadreCell value={cadre.permanenceD5} color="text-purple-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-red-50/40">
-                      <CadreCell value={cadre.permanenceD4} color="text-red-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-orange-50/40">
-                      <CadreCell value={cadre.permanenceD3} color="text-orange-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-amber-50/40">
-                      <CadreCell value={cadre.permanenceD2} color="text-amber-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums bg-slate-50/60">
-                      <CadreCell value={cadre.permanenceD1} color="text-slate-600" />
-                    </td>
-                    <td className="px-2 py-2.5 text-center tabular-nums font-bold text-teal-700 bg-teal-100/60">
-                      {totalPermanences(cadre)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {activeCadres.length === 0 && (
-          <div className="p-8 text-center text-slate-400 text-sm bg-white">
-            Aucun cadre actif.
+                {/* ── Sous-section Noël uniquement ── */}
+                {sortedNoelOnly.length > 0 && (
+                  <>
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-purple-600 bg-purple-50 border-t-2 border-purple-200"
+                      >
+                        🎄 Noël uniquement — hors pool astreinte classique
+                      </td>
+                    </tr>
+                    {sortedNoelOnly.map(cadre => {
+                      const isSelected = selectedCadreId === cadre.id;
+                      const rowBase = isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'bg-white hover:bg-slate-50';
+                      return (
+                        <tr
+                          key={cadre.id}
+                          onClick={() => setSelectedCadreId(cadre.id ?? null)}
+                          className={`cursor-pointer transition-colors opacity-80 ${rowBase}`}
+                        >
+                          <td className={`px-3 py-2 text-sm font-medium text-slate-600 border-r border-slate-100 sticky left-0 z-10 italic ${isSelected ? 'bg-blue-50' : 'bg-white'}`}>
+                            {cadre.name}
+                          </td>
+                          <td className="px-2 py-2 text-center tabular-nums bg-purple-50/40">
+                            <CadreCell value={cadre.astreinteD5} color="text-purple-600" />
+                          </td>
+                          {/* D4→D1 : non applicable — affichés en gris */}
+                          <td className="px-2 py-2 text-center text-slate-200 text-xs">—</td>
+                          <td className="px-2 py-2 text-center text-slate-200 text-xs">—</td>
+                          <td className="px-2 py-2 text-center text-slate-200 text-xs">—</td>
+                          <td className="px-2 py-2 text-center text-slate-200 text-xs">—</td>
+                          <td className="px-2 py-2 text-center tabular-nums font-bold text-purple-600 bg-blue-100/40">
+                            {cadre.astreinteD5 || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </>
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
+          {astreinteCadres.length === 0 && (
+            <div className="p-6 text-center text-slate-400 text-sm bg-white">Aucun cadre éligible.</div>
+          )}
+        </div>
+
+        {/* ── Tableau Permanences ── */}
+        <div className="rounded-xl border border-teal-200 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr>
+                  <th
+                    rowSpan={2}
+                    className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-white border-b border-r border-slate-200 sticky left-0 z-10"
+                  >
+                    Cadre
+                  </th>
+                  <th
+                    colSpan={6}
+                    className="text-center py-2.5 text-xs font-bold text-teal-700 uppercase tracking-wider bg-teal-50 border-b border-teal-200"
+                  >
+                    🗓 Permanences (jours)
+                  </th>
+                </tr>
+                <tr className="border-b-2 border-teal-200">
+                  {PERMANENCE_COLS.map(col => (
+                    <th
+                      key={`ph-${col.key}`}
+                      className={`text-center px-2 py-2 text-xs font-semibold min-w-[44px] ${col.bg} ${col.text}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedPerm.map(cadre => {
+                  const isSelected = selectedCadreId === cadre.id;
+                  const rowBase = isSelected ? 'bg-teal-50 hover:bg-teal-100' : 'bg-white hover:bg-slate-50';
+                  return (
+                    <tr
+                      key={cadre.id}
+                      onClick={() => setSelectedCadreId(cadre.id ?? null)}
+                      className={`cursor-pointer transition-colors ${rowBase}`}
+                    >
+                      <td className={`px-3 py-2.5 font-medium text-slate-900 border-r border-slate-100 sticky left-0 z-10 ${isSelected ? 'bg-teal-50' : 'bg-white'}`}>
+                        {cadre.name}
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-purple-50/40">
+                        <CadreCell value={cadre.permanenceD5} color="text-purple-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-red-50/40">
+                        <CadreCell value={cadre.permanenceD4} color="text-red-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-orange-50/40">
+                        <CadreCell value={cadre.permanenceD3} color="text-orange-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-amber-50/40">
+                        <CadreCell value={cadre.permanenceD2} color="text-amber-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums bg-slate-50/60">
+                        <CadreCell value={cadre.permanenceD1} color="text-slate-600" />
+                      </td>
+                      <td className="px-2 py-2.5 text-center tabular-nums font-bold text-teal-700 bg-teal-100/60">
+                        {totalPermanences(cadre)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {activeCadres.length === 0 && (
+            <div className="p-6 text-center text-slate-400 text-sm bg-white">Aucun cadre actif.</div>
+          )}
+        </div>
+
       </div>
 
       {/* ─── Annual / period evolution ──────────────────────────────────── */}
@@ -529,7 +619,7 @@ export default function EquityRecap() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sorted.map(cadre => {
+                {sortedPerm.map(cadre => {
                   const cumAst = totalAstreintes(cadre);
                   const cumPerm = totalPermanences(cadre);
                   return (

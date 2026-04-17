@@ -228,7 +228,8 @@ export default function GeneratePlanning() {
       });
 
       const assigned = autoAssignSlots(
-        clearedSlots, baseCadres, vacations, activePeriod.zone, wishes, passes
+        clearedSlots, baseCadres, vacations, activePeriod.zone, wishes, passes,
+        activePeriod.startDate, activePeriod.endDate,
       );
 
       step = 'sauvegarde des assignations';

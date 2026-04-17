@@ -41,20 +41,18 @@ export default function CadreManagement() {
     e.preventDefault();
     if (!form.name.trim()) return;
 
-    const effectiveRole: Cadre['role'] = !form.nearMuseum ? 'permanence' : form.role;
-
     if (editing) {
       await updateCadre(editing.id!, {
         name: form.name,
         prenom: form.prenom,
-        role: effectiveRole,
+        role: form.role,
         nearMuseum: form.nearMuseum,
       });
     } else {
       await addCadre({
         name: form.name,
         prenom: form.prenom,
-        role: effectiveRole,
+        role: form.role,
         nearMuseum: form.nearMuseum,
         ...ZERO_COUNTERS,
         active: true,
@@ -146,24 +144,29 @@ export default function CadreManagement() {
               <label className="block text-xs font-medium text-slate-500 mb-1.5">Rôle</label>
               <select
                 value={form.role}
-                onChange={e => setForm({ ...form, role: e.target.value as Cadre['role'] })}
+                onChange={e => {
+                  const role = e.target.value as Cadre['role'];
+                  setForm({ ...form, role, nearMuseum: role === 'both' });
+                }}
                 className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-shadow"
               >
-                <option value="astreinte">Astreinte</option>
+                <option value="both">Astreinte &amp; permanence</option>
                 <option value="permanence">Permanence</option>
-                <option value="both">Les deux</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">Proximite</label>
-              <label className="flex items-center gap-2.5 mt-2 cursor-pointer">
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">Proximité</label>
+              <label className="flex items-center gap-2.5 mt-2 cursor-not-allowed opacity-60">
                 <input
                   type="checkbox"
                   checked={form.nearMuseum}
-                  onChange={e => setForm({ ...form, nearMuseum: e.target.checked })}
-                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  disabled
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600"
                 />
-                <span className="text-sm text-slate-700">Moins de 30 minutes</span>
+                <span className="text-sm text-slate-600">
+                  Moins de 30 min
+                  <span className="ml-1 text-[10px] text-slate-400">(défini par le rôle)</span>
+                </span>
               </label>
             </div>
           </div>
@@ -217,7 +220,7 @@ export default function CadreManagement() {
                             : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      {cadre.role === 'both' ? 'A + P' : cadre.role === 'astreinte' ? 'Astreinte' : 'Permanence'}
+                      {cadre.role === 'both' ? 'Astr. & Perm.' : cadre.role === 'astreinte' ? 'Astreinte' : 'Permanence'}
                     </span>
                   </td>
                   <td className="px-4 py-3">
