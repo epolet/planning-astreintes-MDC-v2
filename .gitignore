@@ -22,5 +22,7 @@ dist-ssr
 *.sw?
 .env
 
-# SQLite database file
+# SQLite database files (including WAL mode companions)
 data/planning.db
+data/planning.db-shm
+data/planning.db-wal
