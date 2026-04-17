@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import type { Slot, Cadre, DifficultyLevel } from '../types';
 import { DIFFICULTY_LABELS, fullName, totalAstreintes, totalPermanences } from '../types';
 import { getAllPeriodScores, type PerPeriodScore } from '../db/periods';
@@ -142,6 +142,396 @@ function buildRecoRows(cadre: Cadre, activeCadres: Cadre[]): Record<string, unkn
   return rows;
 }
 
+// ── Styling helpers ────────────────────────────────────────────────────────────
+
+/** Palette hex (sans #) alignée sur les couleurs Tailwind de l'appli */
+const C = {
+  purple50: 'F5F3FF', purple200: 'DDD6FE', purple500: '8B5CF6', purple700: '6D28D9',
+  red50:    'FEF2F2', red500:    'EF4444', red600:    'DC2626',
+  orange50: 'FFF7ED', orange400: 'FB923C', orange600: 'EA580C',
+  amber50:  'FFFBEB', amber400:  'FBBF24', amber600:  'D97706',
+  slate50:  'F8FAFC', slate100:  'F1F5F9', slate200:  'E2E8F0',
+  slate300: 'CBD5E1', slate400:  '94A3B8', slate500:  '64748B', slate600:  '475569', slate900: '0F172A',
+  blue50:   'EFF6FF', blue100:   'DBEAFE', blue200:   'BFDBFE', blue700:   '1D4ED8', blue800: '1E40AF',
+  teal50:   'F0FDFA', teal100:   'CCFBF1', teal200:   '99F6E4', teal700:   '0F766E', teal800: '115E59',
+  white: 'FFFFFF',
+};
+
+type XFill  = { patternType: 'solid'; fgColor: { rgb: string } };
+type XFont  = { bold?: boolean; italic?: boolean; color?: { rgb: string }; sz?: number };
+type XAlign = { horizontal?: 'left' | 'center' | 'right'; vertical?: 'top' | 'center' | 'bottom' };
+type XBorder = { style: string; color: { rgb: string } };
+type XStyle = { fill?: XFill; font?: XFont; alignment?: XAlign; border?: { top?: XBorder; bottom?: XBorder; left?: XBorder; right?: XBorder } };
+type SCell  = { v: string | number; t: 's' | 'n'; s: XStyle };
+
+function fill(rgb: string): XFill { return { patternType: 'solid', fgColor: { rgb } }; }
+function border(rgb = C.slate200): { top: XBorder; bottom: XBorder; left: XBorder; right: XBorder } {
+  const b = { style: 'thin', color: { rgb } };
+  return { top: b, bottom: b, left: b, right: b };
+}
+function sc(v: string | number, s: XStyle): SCell { return { v, t: typeof v === 'number' ? 'n' : 's', s }; }
+
+/** Définition d'une colonne de difficulté (astreinte ou permanence) */
+type DiffCol = { label: string; hdrBg: string; hdrText: string; cellBg: string; cellText: string; key: keyof Cadre };
+
+const AST_DIFF_COLS: DiffCol[] = [
+  { label: '🎄 Noël', hdrBg: C.purple500, hdrText: C.white,  cellBg: C.purple50, cellText: C.purple700, key: 'astreinteD5' },
+  { label: 'D4',      hdrBg: C.red500,    hdrText: C.white,  cellBg: C.red50,    cellText: C.red600,    key: 'astreinteD4' },
+  { label: 'D3',      hdrBg: C.orange400, hdrText: C.white,  cellBg: C.orange50, cellText: C.orange600, key: 'astreinteD3' },
+  { label: 'D2',      hdrBg: C.amber400,  hdrText: C.white,  cellBg: C.amber50,  cellText: C.amber600,  key: 'astreinteD2' },
+  { label: 'D1',      hdrBg: C.slate400,  hdrText: C.white,  cellBg: C.slate50,  cellText: C.slate600,  key: 'astreinteD1' },
+];
+const PERM_DIFF_COLS: DiffCol[] = [
+  { label: '🎄 Noël', hdrBg: C.purple500, hdrText: C.white,  cellBg: C.purple50, cellText: C.purple700, key: 'permanenceD5' },
+  { label: 'D4',      hdrBg: C.red500,    hdrText: C.white,  cellBg: C.red50,    cellText: C.red600,    key: 'permanenceD4' },
+  { label: 'D3',      hdrBg: C.orange400, hdrText: C.white,  cellBg: C.orange50, cellText: C.orange600, key: 'permanenceD3' },
+  { label: 'D2',      hdrBg: C.amber400,  hdrText: C.white,  cellBg: C.amber50,  cellText: C.amber600,  key: 'permanenceD2' },
+  { label: 'D1',      hdrBg: C.slate400,  hdrText: C.white,  cellBg: C.slate50,  cellText: C.slate600,  key: 'permanenceD1' },
+];
+
+/** Construit la feuille "Récap Équité" avec mise en forme couleur */
+function buildEquitySheet(rawCadres: Cadre[]): XLSX.WorkSheet {
+  const activeCadres       = rawCadres.filter(c => c.active);
+  const astreinteCadres    = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
+  const permOnlyCadres     = activeCadres.filter(c => c.role === 'permanence');
+
+  const wScore = (c: Cadre, prefix: 'astreinte' | 'permanence') =>
+    [1,2,3,4,5].reduce((s, d) => s + ((c[`${prefix}D${d}` as keyof Cadre] as number) ?? 0) * d, 0);
+
+  const sortedAst = [...astreinteCadres].sort(
+    (a, b) => totalAstreintes(b) - totalAstreintes(a) || wScore(b, 'astreinte') - wScore(a, 'astreinte'));
+  const sortedNoelOnly = [...permOnlyCadres].sort((a, b) => b.astreinteD5 - a.astreinteD5);
+  const sortedPerm = [...activeCadres].sort(
+    (a, b) => totalPermanences(b) - totalPermanences(a) || wScore(b, 'permanence') - wScore(a, 'permanence'));
+
+  const aoa: (SCell | string)[][] = [];
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+  let r = 0;
+
+  const NCOLS = 7; // Cadre + 5 diff + Total
+
+  const titleStyle: XStyle = { fill: fill(C.slate900), font: { bold: true, color: { rgb: C.white }, sz: 13 }, alignment: { horizontal: 'center' } };
+  const emptyRow = () => Array(NCOLS).fill(sc('', {}));
+
+  function sectionHeader(label: string, bg: string, textColor: string, borderColor: string): SCell[] {
+    const s: XStyle = { fill: fill(bg), font: { bold: true, color: { rgb: textColor }, sz: 11 }, alignment: { horizontal: 'center' }, border: border(borderColor) };
+    return [sc(label, s), ...Array(NCOLS - 1).fill(sc('', s))];
+  }
+
+  function subHeaders(cols: DiffCol[], totalBg: string, totalText: string): SCell[] {
+    return [
+      sc('Cadre', { fill: fill(C.slate100), font: { bold: true, color: { rgb: C.slate500 } }, border: border() }),
+      ...cols.map(col => sc(col.label, { fill: fill(col.hdrBg), font: { bold: true, color: { rgb: col.hdrText } }, alignment: { horizontal: 'center' }, border: border() })),
+      sc('Total', { fill: fill(totalBg), font: { bold: true, color: { rgb: totalText } }, alignment: { horizontal: 'center' }, border: border(totalBg) }),
+    ];
+  }
+
+  function dataRow(cadre: Cadre, cols: DiffCol[], totalVal: number, totalBg: string, totalText: string, rowIdx: number): SCell[] {
+    const rowBg = rowIdx % 2 === 0 ? C.white : C.slate50;
+    return [
+      sc(cadre.name, { fill: fill(rowBg), font: { color: { rgb: C.slate900 } }, border: border() }),
+      ...cols.map(col => {
+        const val = (cadre[col.key] as number) ?? 0;
+        return sc(val, { fill: fill(col.cellBg), font: val > 0 ? { bold: true, color: { rgb: col.cellText } } : { color: { rgb: C.slate300 } }, alignment: { horizontal: 'center' }, border: border() });
+      }),
+      sc(totalVal, { fill: fill(totalBg), font: { bold: true, color: { rgb: totalText } }, alignment: { horizontal: 'center' }, border: border(totalBg) }),
+    ];
+  }
+
+  // Title
+  aoa.push([sc('RÉCAPITULATIF ÉQUITÉ — Compteurs cumulatifs (toutes périodes publiées + brouillon en cours)', titleStyle), ...Array(NCOLS - 1).fill(sc('', titleStyle))]);
+  merges.push({ s: { r, c: 0 }, e: { r, c: NCOLS - 1 } }); r++;
+  aoa.push(emptyRow()); r++;
+
+  // ── Astreintes ──────────────────────────────────────────────────────────────
+  aoa.push(sectionHeader('📅 ASTREINTES (semaines)', C.blue50, C.blue700, C.blue200));
+  merges.push({ s: { r, c: 0 }, e: { r, c: NCOLS - 1 } }); r++;
+  aoa.push(subHeaders(AST_DIFF_COLS, C.blue100, C.blue800)); r++;
+
+  sortedAst.forEach((cadre, i) => { aoa.push(dataRow(cadre, AST_DIFF_COLS, totalAstreintes(cadre), C.blue100, C.blue800, i)); r++; });
+
+  if (sortedNoelOnly.length > 0) {
+    const noelHdrStyle: XStyle = { fill: fill(C.purple50), font: { bold: true, color: { rgb: C.purple700 } }, border: border(C.purple200) };
+    aoa.push([sc('🎄 Noël uniquement — hors pool astreinte classique', noelHdrStyle), ...Array(NCOLS - 1).fill(sc('', noelHdrStyle))]);
+    merges.push({ s: { r, c: 0 }, e: { r, c: NCOLS - 1 } }); r++;
+    sortedNoelOnly.forEach(cadre => {
+      aoa.push([
+        sc(cadre.name, { fill: fill(C.purple50), font: { italic: true, color: { rgb: C.slate600 } }, border: border() }),
+        sc(cadre.astreinteD5, { fill: fill(C.purple50), font: cadre.astreinteD5 > 0 ? { bold: true, color: { rgb: C.purple700 } } : { color: { rgb: C.slate300 } }, alignment: { horizontal: 'center' }, border: border() }),
+        ...Array(4).fill(sc('—', { fill: fill(C.white), font: { color: { rgb: C.slate300 } }, alignment: { horizontal: 'center' }, border: border() })),
+        sc(cadre.astreinteD5, { fill: fill(C.purple50), font: { bold: true, color: { rgb: C.purple700 } }, alignment: { horizontal: 'center' }, border: border() }),
+      ]); r++;
+    });
+  }
+
+  aoa.push(emptyRow()); r++;
+
+  // ── Permanences ─────────────────────────────────────────────────────────────
+  aoa.push(sectionHeader('🗓 PERMANENCES (jours)', C.teal50, C.teal700, C.teal200));
+  merges.push({ s: { r, c: 0 }, e: { r, c: NCOLS - 1 } }); r++;
+  aoa.push(subHeaders(PERM_DIFF_COLS, C.teal100, C.teal800)); r++;
+
+  sortedPerm.forEach((cadre, i) => { aoa.push(dataRow(cadre, PERM_DIFF_COLS, totalPermanences(cadre), C.teal100, C.teal800, i)); r++; });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ width: 22 }, { width: 10 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }];
+  ws['!merges'] = merges;
+  return ws;
+}
+
+// ── Per-column diff color schema (index = col offset from 2 in cadre sheets) ──
+const DIFF_COL = [
+  { bg: C.purple50, text: C.purple700, hdrBg: C.purple500 }, // D5 / Noël
+  { bg: C.red50,    text: C.red600,    hdrBg: C.red500    }, // D4
+  { bg: C.orange50, text: C.orange600, hdrBg: C.orange400 }, // D3
+  { bg: C.amber50,  text: C.amber600,  hdrBg: C.amber400  }, // D2
+  { bg: C.slate50,  text: C.slate600,  hdrBg: C.slate400  }, // D1
+  { bg: C.blue100,  text: C.blue800,   hdrBg: C.blue700   }, // Astr Total
+  { bg: C.purple50, text: C.purple700, hdrBg: C.purple500 }, // D5 (perm)
+  { bg: C.red50,    text: C.red600,    hdrBg: C.red500    }, // D4
+  { bg: C.orange50, text: C.orange600, hdrBg: C.orange400 }, // D3
+  { bg: C.amber50,  text: C.amber600,  hdrBg: C.amber400  }, // D2
+  { bg: C.slate50,  text: C.slate600,  hdrBg: C.slate400  }, // D1
+  { bg: C.teal100,  text: C.teal800,   hdrBg: C.teal700   }, // Perm Total
+];
+
+/** Applique la mise en forme complète aux feuilles individuelles par cadre */
+function styleCadreSheet(ws: XLSX.WorkSheet): void {
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  const getVal = (r: number, c: number): string => String(ws[XLSX.utils.encode_cell({ r, c })]?.v ?? '');
+  const set = (r: number, c: number, s: XStyle) => {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    if (!ws[ref]) ws[ref] = { v: '', t: 's' };
+    ws[ref].s = s;
+  };
+  const setRow = (r: number, s: XStyle, ncols = 14) => { for (let c = 0; c < ncols; c++) set(r, c, s); };
+
+  const colHdrStyle = (i: number): XStyle => {
+    const dc = DIFF_COL[i - 2];
+    return {
+      fill: fill(dc ? dc.hdrBg : C.slate100),
+      font: { bold: true, color: { rgb: dc ? C.white : C.slate500 }, sz: 10 },
+      alignment: { horizontal: i > 1 ? 'center' : 'left', vertical: 'center' },
+      border: border(),
+    };
+  };
+
+  type Sect = 'HISTORY' | 'ANALYSIS' | 'SLOTS';
+  let sect: Sect = 'HISTORY';
+
+  for (let r = 0; r <= range.e.r; r++) {
+    const col0 = getVal(r, 0);
+
+    // ── json_to_sheet header row (column keys) ────────────────────────────
+    if (r === 0) {
+      for (let c = 0; c <= Math.min(range.e.c, 13); c++) set(r, c, colHdrStyle(c));
+      continue;
+    }
+
+    // ── Section tracker ────────────────────────────────────────────────────
+    if (col0.includes('HISTORIQUE'))           sect = 'HISTORY';
+    else if (col0.includes('ANALYSE'))         sect = 'ANALYSIS';
+    else if (col0.includes('CRÉNEAUX'))        sect = 'SLOTS';
+
+    // ── Big section header (═══) ──────────────────────────────────────────
+    if (col0.includes('═══')) {
+      setRow(r, { fill: fill(C.slate900), font: { bold: true, color: { rgb: C.white }, sz: 11 }, alignment: { horizontal: 'left' } });
+      continue;
+    }
+
+    // ── Blank row ─────────────────────────────────────────────────────────
+    if (!col0) { setRow(r, { fill: fill(C.white) }); continue; }
+
+    // ═══════════════════ HISTORY SECTION ═════════════════════════════════
+    if (sect === 'HISTORY') {
+      if (col0 === 'Période') {
+        for (let c = 0; c <= 13; c++) set(r, c, colHdrStyle(c));
+        continue;
+      }
+      if (col0 === 'TOTAL CUMULÉ') {
+        for (let c = 0; c <= 13; c++) {
+          const dc = DIFF_COL[c - 2];
+          set(r, c, {
+            fill: fill(dc ? dc.bg : C.slate200),
+            font: { bold: true, color: { rgb: dc ? dc.text : C.slate900 } },
+            alignment: { horizontal: c > 0 ? 'center' : 'left', vertical: 'center' },
+            border: border(C.slate400),
+          });
+        }
+        continue;
+      }
+      if (col0.startsWith('──')) {
+        for (let c = 0; c <= 13; c++) {
+          const dc = DIFF_COL[c - 2];
+          set(r, c, {
+            fill: fill(dc ? dc.bg : C.slate100),
+            font: { bold: true, italic: true, color: { rgb: dc ? dc.text : C.slate600 } },
+            alignment: { horizontal: c > 0 ? 'center' : 'left', vertical: 'center' },
+            border: border(C.slate300),
+          });
+        }
+        continue;
+      }
+      // Regular period data row
+      const isDraft = col0.includes('(en cours)');
+      for (let c = 0; c <= 13; c++) {
+        const dc = DIFF_COL[c - 2];
+        const val = ws[XLSX.utils.encode_cell({ r, c })]?.v;
+        set(r, c, {
+          fill: fill(isDraft ? C.amber50 : (dc ? dc.bg : C.white)),
+          font: {
+            color: { rgb: dc ? dc.text : C.slate900 },
+            bold: c > 1 && typeof val === 'number' && val > 0,
+          },
+          alignment: { horizontal: c > 1 ? 'center' : 'left', vertical: 'center' },
+          border: border(),
+        });
+      }
+      continue;
+    }
+
+    // ═══════════════════ ANALYSIS SECTION ════════════════════════════════
+    if (sect === 'ANALYSIS') {
+      if (col0.startsWith('Astreintes total') || col0.startsWith('Permanences total')) {
+        const isAst = col0.startsWith('Astreintes');
+        setRow(r, { fill: fill(isAst ? C.blue50 : C.teal50), font: { bold: true, color: { rgb: isAst ? C.blue700 : C.teal700 } }, border: border() });
+        continue;
+      }
+      if (col0 === 'Catégorie') {
+        setRow(r, { fill: fill(C.slate100), font: { bold: true, color: { rgb: C.slate500 } }, border: border() });
+        continue;
+      }
+      if (col0.startsWith('✅')) {
+        setRow(r, { fill: fill('F0FDF4'), font: { bold: true, color: { rgb: '15803D' } } }); continue;
+      }
+      if (col0.startsWith('🔵')) {
+        setRow(r, { fill: fill(C.blue50), font: { bold: true, color: { rgb: C.blue700 } } }); continue;
+      }
+      if (col0.startsWith('⚠️')) {
+        setRow(r, { fill: fill(C.red50), font: { bold: true, color: { rgb: 'B91C1C' } } }); continue;
+      }
+      if (col0.startsWith('—')) {
+        setRow(r, { fill: fill(C.slate50), font: { bold: true, color: { rgb: C.slate600 } } }); continue;
+      }
+      // Indented reco items / notes / (aucun)
+      setRow(r, { fill: fill(C.white), font: { color: { rgb: C.slate600 } }, border: border() });
+      continue;
+    }
+
+    // ═══════════════════ SLOTS SECTION ═══════════════════════════════════
+    if (sect === 'SLOTS') {
+      if (col0.startsWith('-- ')) {
+        const isAst = col0.includes('ASTREINTE');
+        setRow(r, {
+          fill: fill(isAst ? C.blue50 : C.teal50),
+          font: { bold: true, color: { rgb: isAst ? C.blue700 : C.teal700 } },
+          border: border(isAst ? C.blue200 : C.teal200),
+        });
+        continue;
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(col0)) {
+        const diff = (ws[XLSX.utils.encode_cell({ r, c: 2 })]?.v as number) ?? 1;
+        const dc = DIFF_COL[5 - diff]; // diff5→idx0(purple)…diff1→idx4(slate)
+        set(r, 0, { fill: fill(dc.bg), font: { bold: true, color: { rgb: dc.text } }, border: border() });
+        set(r, 1, { fill: fill(dc.bg), font: { color: { rgb: dc.text } }, border: border() });
+        set(r, 2, { fill: fill(dc.bg), font: { bold: true, color: { rgb: dc.text } }, alignment: { horizontal: 'center' }, border: border() });
+        set(r, 3, { fill: fill(C.white), font: { color: { rgb: C.slate600 } }, border: border() });
+        for (let c = 4; c <= 13; c++) set(r, c, { fill: fill(C.white), border: border() });
+        continue;
+      }
+      setRow(r, { fill: fill(C.white), font: { color: { rgb: C.slate900 } } });
+    }
+  }
+}
+
+/** Applique une mise en forme colorée aux feuilles tabulaires simples (json_to_sheet).
+ *  colRules : pour chaque colonne (par index), règle de style sur la valeur de la cellule. */
+function styleSimpleSheet(
+  ws: XLSX.WorkSheet,
+  colRules: ((val: unknown, rowBg: string) => XStyle)[],
+  opts: { headerBg?: string; headerText?: string; altRow?: boolean } = {}
+): void {
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const { headerBg = C.slate900, headerText = C.white, altRow = true } = opts;
+
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const isHeader = r === 0;
+    const rowBg = altRow && !isHeader ? ((r % 2 === 0) ? C.white : C.slate50) : C.white;
+
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (!ws[ref]) ws[ref] = { v: '', t: 's' };
+
+      if (isHeader) {
+        ws[ref].s = {
+          fill: fill(headerBg),
+          font: { bold: true, color: { rgb: headerText } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border: border(headerBg),
+        };
+        continue;
+      }
+
+      const rule = colRules[c];
+      ws[ref].s = rule ? rule(ws[ref].v, rowBg) : { fill: fill(rowBg), border: border() };
+    }
+  }
+}
+
+/** Règle standard : fond alterné + bordure, texte slate */
+const ruleDefault = (_: unknown, rowBg: string): XStyle =>
+  ({ fill: fill(rowBg), font: { color: { rgb: C.slate900 } }, border: border() });
+
+/** Règle : colorie selon le type Astreinte/Permanence */
+const ruleType = (val: unknown, rowBg: string): XStyle => {
+  if (val === 'Astreinte') return { fill: fill(C.blue50), font: { bold: true, color: { rgb: C.blue700 } }, alignment: { horizontal: 'center' }, border: border(C.blue200) };
+  if (val === 'Permanence') return { fill: fill(C.teal50), font: { bold: true, color: { rgb: C.teal700 } }, alignment: { horizontal: 'center' }, border: border(C.teal200) };
+  return ruleDefault(val, rowBg);
+};
+
+/** Règle : colorie selon le label de difficulté */
+const ruleDiff = (val: unknown, rowBg: string): XStyle => {
+  const dc =
+    String(val).includes('Noël') || String(val).includes('D5') ? DIFF_COL[0] :
+    String(val).includes('D4')   ? DIFF_COL[1] :
+    String(val).includes('D3')   ? DIFF_COL[2] :
+    String(val).includes('D2')   ? DIFF_COL[3] :
+    String(val).includes('D1')   ? DIFF_COL[4] : null;
+  if (!dc) return ruleDefault(val, rowBg);
+  return { fill: fill(dc.bg), font: { bold: true, color: { rgb: dc.text } }, alignment: { horizontal: 'center' }, border: border() };
+};
+
+/** Règle : met en évidence si valeur > 0 */
+const ruleHighlightPos = (val: unknown, rowBg: string): XStyle => {
+  if (typeof val === 'number' && val > 0)
+    return { fill: fill(C.blue50), font: { bold: true, color: { rgb: C.blue700 } }, alignment: { horizontal: 'center' }, border: border() };
+  return { fill: fill(rowBg), font: { color: { rgb: C.slate400 } }, alignment: { horizontal: 'center' }, border: border() };
+};
+
+/** Règle : total Astreintes (bleu) */
+const ruleTotalAst = (_: unknown, __: string): XStyle =>
+  ({ fill: fill(C.blue100), font: { bold: true, color: { rgb: C.blue800 } }, alignment: { horizontal: 'center' }, border: border(C.blue200) });
+
+/** Règle : total Permanences (teal) */
+const ruleTotalPerm = (_: unknown, __: string): XStyle =>
+  ({ fill: fill(C.teal100), font: { bold: true, color: { rgb: C.teal800 } }, alignment: { horizontal: 'center' }, border: border(C.teal200) });
+
+/** Règle : colorie les cellules numériques par difficulté (pour stats d'équité) */
+const ruleDiffNum = (colIdx: number) => (val: unknown, rowBg: string): XStyle => {
+  const dc = DIFF_COL[colIdx];
+  if (!dc) return ruleDefault(val, rowBg);
+  const isNonZero = typeof val === 'number' && val > 0;
+  return {
+    fill: fill(dc.bg),
+    font: { bold: isNonZero, color: { rgb: isNonZero ? dc.text : C.slate300 } },
+    alignment: { horizontal: 'center' },
+    border: border(),
+  };
+};
+
 export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: string) {
   const wb = XLSX.utils.book_new();
 
@@ -168,6 +558,24 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
     { width: 12 }, { width: 14 }, { width: 18 }, { width: 8 },
     { width: 20 }, { width: 14 }, { width: 40 },
   ];
+  const colRulesChron: ((val: unknown, rowBg: string) => XStyle)[] = [
+    ruleDefault,   // 0: Date
+    ruleType,      // 1: Type
+    ruleDiff,      // 2: Difficulté (label)
+    (val, rowBg) => {  // 3: Niveau (1-5)
+      const n = typeof val === 'number' ? val : 0;
+      const dc = n >= 1 && n <= 5 ? DIFF_COL[5 - n] : null;
+      if (!dc) return ruleDefault(val, rowBg);
+      return { fill: fill(dc.bg), font: { bold: true, color: { rgb: dc.text } }, alignment: { horizontal: 'center' }, border: border() };
+    },
+    ruleDefault,   // 4: Assigné à
+    (val, rowBg) =>  // 5: Statut
+      val === 'Manuel'
+        ? { fill: fill(C.amber50), font: { bold: true, color: { rgb: C.amber600 } }, alignment: { horizontal: 'center' }, border: border(C.amber400) }
+        : { fill: fill(rowBg), font: { color: { rgb: C.slate400 } }, alignment: { horizontal: 'center' }, border: border() },
+    ruleDefault,   // 6: Détail
+  ];
+  styleSimpleSheet(ws1, colRulesChron);
   XLSX.utils.book_append_sheet(wb, ws1, 'Planning Chronologique');
 
   // ── Sheet 2: Planning condensé ────────────────────────────────────────────────
@@ -244,6 +652,24 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
         { width: 10 }, { width: 13 }, { width: 13 }, { width: 20 },
         { width: 20 }, { width: 22 }, { width: 24 }, { width: 45 },
       ];
+      const ruleAssigned = (isAst: boolean) => (val: unknown, rowBg: string): XStyle => {
+        const isEmpty = !val || val === '' || val === '(non assigné)';
+        if (isEmpty) return { fill: fill(rowBg), font: { italic: true, color: { rgb: C.slate400 } }, border: border() };
+        return isAst
+          ? { fill: fill(C.blue50), font: { bold: true, color: { rgb: C.blue700 } }, border: border(C.blue200) }
+          : { fill: fill(C.teal50), font: { bold: true, color: { rgb: C.teal700 } }, border: border(C.teal200) };
+      };
+      const colRulesCond: ((val: unknown, rowBg: string) => XStyle)[] = [
+        (_, rowBg) => ({ fill: fill(rowBg), font: { bold: true, color: { rgb: C.slate600 } }, alignment: { horizontal: 'center' }, border: border() }),
+        ruleDefault,       // Du
+        ruleDefault,       // Au
+        ruleAssigned(true),  // Astreinte
+        ruleAssigned(false), // Perm Samedi
+        ruleAssigned(false), // Perm Dimanche
+        ruleAssigned(false), // Perm Jour férié
+        ruleDefault,       // Note
+      ];
+      styleSimpleSheet(wsC, colRulesCond);
       XLSX.utils.book_append_sheet(wb, wsC, 'Planning condensé');
     }
   }
@@ -278,7 +704,33 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
     { width: 14 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 12 },
     { width: 14 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 12 },
   ];
+  const ruleRoleCell = (val: unknown, rowBg: string): XStyle => {
+    if (val === 'Les deux') return { fill: fill(C.blue50), font: { bold: true, color: { rgb: C.blue700 } }, alignment: { horizontal: 'center' }, border: border(C.blue200) };
+    return ruleType(val, rowBg);
+  };
+  const colRulesStats: ((val: unknown, rowBg: string) => XStyle)[] = [
+    ruleDefault,      // 0: Nom
+    ruleRoleCell,     // 1: Rôle
+    ruleDefault,      // 2: Proximité
+    ruleDiffNum(0),   // 3: Astr. Noël (D5)
+    ruleDiffNum(1),   // 4: Astr. D4
+    ruleDiffNum(2),   // 5: Astr. D3
+    ruleDiffNum(3),   // 6: Astr. D2
+    ruleDiffNum(4),   // 7: Astr. D1
+    ruleTotalAst,     // 8: Astr. Total
+    ruleDiffNum(6),   // 9:  Perm. Noël (D5)  — same palette as astr D5
+    ruleDiffNum(7),   // 10: Perm. D4
+    ruleDiffNum(8),   // 11: Perm. D3
+    ruleDiffNum(9),   // 12: Perm. D2
+    ruleDiffNum(10),  // 13: Perm. D1
+    ruleTotalPerm,    // 14: Perm. Total
+  ];
+  styleSimpleSheet(ws2, colRulesStats, { headerBg: C.slate900, headerText: C.white });
   XLSX.utils.book_append_sheet(wb, ws2, "Statistiques d'Équité");
+
+  // ── Sheet: Récap Équité (tableaux astreintes + permanences avec mise en forme) ─
+  const wsEquity = buildEquitySheet(rawCadres);
+  XLSX.utils.book_append_sheet(wb, wsEquity, 'Récap Équité');
 
   // ── Sheet 4: Vœux par créneau ────────────────────────────────────────────────
   if (periodId) {
@@ -313,6 +765,16 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
         { width: 12 }, { width: 14 }, { width: 18 }, { width: 40 },
         { width: 20 }, { width: 10 }, { width: 60 },
       ];
+      const colRulesWishes: ((val: unknown, rowBg: string) => XStyle)[] = [
+        ruleDefault,      // 0: Date
+        ruleType,         // 1: Type
+        ruleDiff,         // 2: Difficulté
+        ruleDefault,      // 3: Détail
+        ruleDefault,      // 4: Assigné à
+        ruleHighlightPos, // 5: Nb vœux
+        ruleDefault,      // 6: Cadres volontaires
+      ];
+      styleSimpleSheet(ws3, colRulesWishes);
       XLSX.utils.book_append_sheet(wb, ws3, 'Vœux');
     }
   }
@@ -513,6 +975,7 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
       { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 },
     ];
 
+    styleCadreSheet(ws);
     const cadreFullName = cadre.prenom ? `${cadre.prenom} ${cadre.name}` : cadre.name;
     const sheetName = cadreFullName.substring(0, 31).replace(/[\\/*?[\]:]/g, '');
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -545,6 +1008,15 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
     const wsAnnual = XLSX.utils.json_to_sheet(annualData);
     const numCols = 1 + allYears.length * 2 + 2;
     wsAnnual['!cols'] = [{ width: 22 }, ...Array(numCols - 1).fill({ width: 16 })];
+    // Build colRules dynamically: Cadre | (Ast. Perm.)×years | Cumul Ast. | Cumul Perm.
+    const colRulesAnnual: ((val: unknown, rowBg: string) => XStyle)[] = [ruleDefault];
+    for (let i = 0; i < allYears.length; i++) {
+      colRulesAnnual.push((_v, _bg) => ({ fill: fill(C.blue50), font: { color: { rgb: C.blue700 } }, alignment: { horizontal: 'center' }, border: border() }));
+      colRulesAnnual.push((_v, _bg) => ({ fill: fill(C.teal50), font: { color: { rgb: C.teal700 } }, alignment: { horizontal: 'center' }, border: border() }));
+    }
+    colRulesAnnual.push(ruleTotalAst);
+    colRulesAnnual.push(ruleTotalPerm);
+    styleSimpleSheet(wsAnnual, colRulesAnnual);
     XLSX.utils.book_append_sheet(wb, wsAnnual, 'Résumé annuel');
   }
 

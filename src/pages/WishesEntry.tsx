@@ -4,7 +4,7 @@ import { usePeriod } from '../context/PeriodContext';
 import { getCadres } from '../db/cadres';
 import { getSlotsByPeriod } from '../db/slots';
 import { getWishesByPeriod, setSlotWishes } from '../db/wishes';
-import type { Cadre, Slot } from '../types';
+import type { Cadre, Slot, DifficultyLevel } from '../types';
 import { fullName, DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '../types';
 import { CheckSquare, Square, Save, Users, AlertCircle, Search } from 'lucide-react';
 
@@ -365,7 +365,7 @@ export default function WishesEntry() {
                   Cadres volontaires
                   {difficultyFilter === null
                     ? ` (${eligibleCadres.length} éligibles)`
-                    : ` — filtre ${DIFFICULTY_LABELS[difficultyFilter]}`}
+                    : ` — filtre ${DIFFICULTY_LABELS[difficultyFilter as DifficultyLevel]}`}
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-24">
                   Action
