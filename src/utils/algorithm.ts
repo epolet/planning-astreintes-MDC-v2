@@ -19,7 +19,6 @@ export function generateAstreinteSlots(
   startDate: string,
   endDate: string,
   vacations: VacationPeriod[],
-  _closedDays: ClosedDay[],
   zone: string
 ): Omit<Slot, 'id'>[] {
   const start = parseISO(startDate);
@@ -186,12 +185,15 @@ function assignAstreinteSlots(
     const isNoel = slot.difficulty === 5;
     let eligible = isNoel ? [...activeCadres] : [...astreinteCadres];
 
-    // If wishes are configured for this slot, restrict to volunteers only
-    if (slot.id && wishes.has(slot.id)) {
+    // Wishes mode: if wishes are active globally, every slot must have at least
+    // one volunteer to be assigned. A slot with no wishes at all is left empty.
+    if (wishes.size > 0) {
+      if (!slot.id || !wishes.has(slot.id)) {
+        slot.cadreId = null; slot.cadreName = ''; continue;
+      }
       const volunteered = new Set(wishes.get(slot.id)!);
       const filtered = eligible.filter(c => volunteered.has(c.id!));
       if (filtered.length > 0) eligible = filtered;
-      // If no volunteer, leave slot unassigned
       else { slot.cadreId = null; slot.cadreName = ''; continue; }
     }
 
@@ -317,25 +319,32 @@ function assignRemainingPermanence(
   for (const slot of remaining) {
     let eligible = [...activeCadres];
 
-    // If wishes are configured for this slot, restrict to volunteers only
-    if (slot.id && wishes.has(slot.id)) {
+    // Wishes mode: if wishes are active globally, every slot must have at least
+    // one volunteer to be assigned. A slot with no wishes at all is left empty.
+    if (wishes.size > 0) {
+      if (!slot.id || !wishes.has(slot.id)) {
+        slot.cadreId = null; slot.cadreName = ''; continue;
+      }
       const volunteered = new Set(wishes.get(slot.id)!);
       const filtered = eligible.filter(c => volunteered.has(c.id!));
       if (filtered.length > 0) eligible = filtered;
       else { slot.cadreId = null; slot.cadreName = ''; continue; }
     }
 
-    // Cap total permanences per period
+    // Hard cap: restrict immediately to cadres below maxPerm.
+    // If none are available, leave the slot unassigned — the cap is never exceeded
+    // in automatic mode. Remaining slots can be assigned manually.
     const belowPermCap = eligible.filter(c => (sessionPermCount.get(c.id!) ?? 0) < maxPerm);
-    if (belowPermCap.length > 0) eligible = belowPermCap;
+    if (belowPermCap.length === 0) continue; // all at cap → slot stays unassigned
+    eligible = belowPermCap;
 
-    // Cap difficult permanences per period (D2+)
+    // Cap difficult permanences per period (D2+) — soft within the below-cap pool
     if (slot.difficulty >= DIFFICULT_PERM_MIN_DIFF) {
       const belowDiffCap = eligible.filter(c => (sessionDiffPermCount.get(c.id!) ?? 0) < maxDiffPerm);
       if (belowDiffCap.length > 0) eligible = belowDiffCap;
     }
 
-    // Avoid consecutive days
+    // Avoid consecutive days (soft)
     const noConsecutive = eligible.filter(c => {
       const last = lastAssigned.get(c.id!);
       if (!last) return true;
@@ -344,7 +353,7 @@ function assignRemainingPermanence(
     });
     if (noConsecutive.length > 0) eligible = noConsecutive;
 
-    // Avoid assigning the weekend to someone already on astreinte that week
+    // Avoid assigning the weekend to someone already on astreinte that week (soft)
     const notOnAstreinteWeekend = eligible.filter(c => {
       const weeks = astreinteAssignedWeeks.get(c.id!);
       if (!weeks) return true;
@@ -356,15 +365,23 @@ function assignRemainingPermanence(
     });
     if (notOnAstreinteWeekend.length > 0) eligible = notOnAstreinteWeekend;
 
-    if (eligible.length === 0) eligible = [...activeCadres];
+    // Fallback: soft constraints emptied the pool → use the full below-cap pool
+    // (hard cap always respected: never promote above-cap cadres as fallback)
+    if (eligible.length === 0) eligible = [...belowPermCap];
     if (eligible.length === 0) continue;
 
     eligible.sort((a, b) => {
       // Diversity: prefer cadres who haven't had this difficulty level yet in session
       const aHasDiff = (countersP.get(a.id!) ?? [0,0,0,0,0])[slot.difficulty - 1] === 0;
       const bHasDiff = (countersP.get(b.id!) ?? [0,0,0,0,0])[slot.difficulty - 1] === 0;
-      if (aHasDiff !== bHasDiff) return aHasDiff ? -1 : 1; // prefer cadre without this diff
-      // Then equity by cumulative counters
+      if (aHasDiff !== bHasDiff) return aHasDiff ? -1 : 1;
+      // FIX (cause 3): intra-period equity first — fewest permanences assigned in
+      // this session. Without this, cadres with less cumulative history absorb all
+      // the overflow once the cap is hit, ending up at 5 while others stay at 3.
+      const aSession = sessionPermCount.get(a.id!) ?? 0;
+      const bSession = sessionPermCount.get(b.id!) ?? 0;
+      if (aSession !== bSession) return aSession - bSession;
+      // Tiebreak: long-term equity via cumulative counters
       return compareByCounts(a, b, countersP, countersA);
     });
 
@@ -433,9 +450,21 @@ export function autoAssignSlots(
   const activeCadres = cadres.filter(c => c.active);
   const astreinteCadres = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
 
-  // Session counters for permanence caps (reset each autoAssign run)
+  // Session counters for permanence caps.
+  // Pre-seeded from already-assigned permanences in the input slots so that
+  // running passes separately (e.g. Pass 2 then Pass 3 with clearType:'none')
+  // correctly accounts for work done by the previous pass — without this, Pass 3
+  // would ignore Pass 2's assignments and allow each cadre to reach maxPerm again,
+  // resulting in double the expected number of permanences.
   const sessionPermCount     = new Map<string, number>();
   const sessionDiffPermCount = new Map<string, number>();
+  for (const slot of slots) {
+    if (slot.type !== 'permanence' || !slot.cadreId) continue;
+    sessionPermCount.set(slot.cadreId, (sessionPermCount.get(slot.cadreId) ?? 0) + 1);
+    if (slot.difficulty >= DIFFICULT_PERM_MIN_DIFF) {
+      sessionDiffPermCount.set(slot.cadreId, (sessionDiffPermCount.get(slot.cadreId) ?? 0) + 1);
+    }
+  }
 
   const astreinteSlots = slots
     .filter(s => s.type === 'astreinte')

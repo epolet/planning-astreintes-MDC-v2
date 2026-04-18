@@ -16,6 +16,8 @@ export interface Cadre {
   permanenceD4: number;
   permanenceD5: number; // Noël
   active: boolean;
+  /** ISO date (YYYY-MM-DD) of departure; null = still active */
+  quitLe?: string | null;
 }
 
 export interface Slot {
@@ -108,7 +110,7 @@ export const ZERO_COUNTERS = {
 
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
   5: 'Noël',
-  4: 'Tres Difficile',
+  4: 'Très Difficile',
   3: 'Difficile',
   2: 'Assez Difficile',
   1: 'Peu Difficile',

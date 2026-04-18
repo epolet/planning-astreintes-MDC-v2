@@ -33,8 +33,17 @@ export async function updateCadre(id: string, updates: Partial<Cadre>): Promise<
   });
 }
 
-export async function deleteCadre(id: string): Promise<void> {
+/** Soft-delete: sets quitte_le to today and actif=0. Historical slots are preserved. */
+export async function archiveCadre(id: string): Promise<void> {
   await apiFetch(`/api/cadres/${id}`, { method: 'DELETE' });
+}
+
+export async function getArchivedCadres(): Promise<Cadre[]> {
+  return apiFetch('/api/cadres/archived');
+}
+
+export async function restoreCadre(id: string): Promise<void> {
+  await apiFetch(`/api/cadres/${id}/restore`, { method: 'POST' });
 }
 
 export async function countSlotsByCadre(id: string): Promise<number> {

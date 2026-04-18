@@ -1,34 +1,22 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { format, addDays, parseISO, getISOWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { getCadres } from '../db/cadres';
-import { getSlotsByPeriod } from '../db/slots';
 import { usePeriod } from '../context/PeriodContext';
 import DifficultyBadge from '../components/DifficultyBadge';
 import SlotModal from '../components/SlotModal';
-import type { Slot, Cadre } from '../types';
-import { Pencil, Download, User } from 'lucide-react';
-import { exportToExcel } from '../utils/export';
+import { useCadres } from '../hooks/useCadres';
+import { usePeriodSlots } from '../hooks/usePeriodSlots';
+import type { Slot } from '../types';
+import { Pencil, Download, User, AlertTriangle } from 'lucide-react';
 
 export default function ListView() {
   const { activePeriod } = usePeriod();
+  const { cadres } = useCadres();
+  const { slots, refresh: refreshSlots } = usePeriodSlots(activePeriod?.id);
   const [filter, setFilter] = useState<'all' | 'astreinte' | 'permanence'>('all');
   const [cadreFilter, setCadreFilter] = useState<string | 'all'>('all');
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [cadres, setCadres] = useState<Cadre[]>([]);
-
-  useEffect(() => {
-    getCadres().then(setCadres).catch(() => setCadres([]));
-  }, []);
-
-  useEffect(() => {
-    if (activePeriod?.id) {
-      getSlotsByPeriod(activePeriod.id).then(setSlots).catch(() => setSlots([]));
-    } else {
-      setSlots([]);
-    }
-  }, [activePeriod]);
 
   const assignedCadres = useMemo(() => {
     return cadres.filter(c => c.active).sort((a, b) => a.name.localeCompare(b.name));
@@ -37,9 +25,10 @@ export default function ListView() {
   const filteredSlots = useMemo(() => {
     let result = slots;
     if (filter !== 'all') result = result.filter(s => s.type === filter);
-    if (cadreFilter !== 'all') result = result.filter(s => s.cadreId === cadreFilter);
+    if (unassignedOnly) result = result.filter(s => !s.cadreId);
+    else if (cadreFilter !== 'all') result = result.filter(s => s.cadreId === cadreFilter);
     return result;
-  }, [slots, filter, cadreFilter]);
+  }, [slots, filter, cadreFilter, unassignedOnly]);
 
   function formatSlotDate(slot: Slot): string {
     if (slot.type === 'astreinte') {
@@ -53,9 +42,7 @@ export default function ListView() {
 
   function handleModalClose() {
     setSelectedSlot(null);
-    if (activePeriod?.id) {
-      getSlotsByPeriod(activePeriod.id).then(setSlots).catch(() => {});
-    }
+    refreshSlots();
   }
 
   if (cadres.length === 0 && slots.length === 0) {
@@ -85,7 +72,21 @@ export default function ListView() {
               </button>
             ))}
           </div>
-          <div className="relative">
+          <button
+            onClick={() => {
+              setUnassignedOnly(v => !v);
+              setCadreFilter('all');
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              unassignedOnly
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Non attribues
+          </button>
+          <div className={`relative transition-opacity duration-200 ${unassignedOnly ? 'opacity-40 pointer-events-none' : ''}`}>
             <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
             <select
               value={cadreFilter === 'all' ? '' : cadreFilter}
@@ -102,7 +103,10 @@ export default function ListView() {
           </div>
           {slots.length > 0 && (
             <button
-              onClick={() => exportToExcel(slots, cadres, activePeriod?.id)}
+              onClick={async () => {
+                const { exportToExcel } = await import('../utils/export');
+                await exportToExcel(slots, cadres, activePeriod?.id);
+              }}
               className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
               <Download className="w-3.5 h-3.5" />
@@ -181,7 +185,8 @@ export default function ListView() {
           </div>
           <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50">
             <p className="text-xs text-slate-500">
-              {filteredSlots.length} creneau{filteredSlots.length > 1 ? 'x' : ''} affiches
+              {filteredSlots.length} creneau{filteredSlots.length > 1 ? 'x' : ''} affiche{filteredSlots.length > 1 ? 's' : ''}
+              {unassignedOnly && ' — filtre : non attribues uniquement'}
             </p>
           </div>
         </div>

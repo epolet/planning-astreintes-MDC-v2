@@ -3,6 +3,7 @@ import { getVacations, addVacation, deleteVacation, getClosedDays, addClosedDay,
 import { resetAllScores } from '../db/cadres';
 import type { VacationPeriod, ClosedDay } from '../types';
 import { Plus, Trash2, MapPin, XCircle, AlertTriangle, Download, Loader2 } from 'lucide-react';
+import { toast } from '../utils/toast';
 import { fetchSchoolHolidays, getSchoolYearsForYear } from '../utils/fetchHolidays';
 
 export default function Settings() {
@@ -25,8 +26,8 @@ export default function Settings() {
   const [showResetDialog, setShowResetDialog] = useState(false);
 
   useEffect(() => {
-    getVacations().then(setVacations).catch(() => setVacations([]));
-    getClosedDays().then(setClosedDays).catch(() => setClosedDays([]));
+    getVacations().then(setVacations).catch(() => { toast.error('Impossible de charger les vacances scolaires'); setVacations([]); });
+    getClosedDays().then(setClosedDays).catch(() => { toast.error('Impossible de charger les jours fermés'); setClosedDays([]); });
   }, []);
 
   async function handleFetchHolidays() {

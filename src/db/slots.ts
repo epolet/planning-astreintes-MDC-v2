@@ -57,9 +57,12 @@ export async function deleteSlot(slotId: string): Promise<void> {
 
 export async function clearAssignmentsByPeriod(
   periodId: string,
-  type?: 'astreinte' | 'permanence'
+  type?: 'astreinte' | 'permanence',
+  /** When true, only wipe auto-assigned slots (status='auto') — keeps manual ones. */
+  autoOnly?: boolean,
 ): Promise<void> {
   const params = new URLSearchParams({ periodId });
   if (type) params.set('type', type);
+  if (autoOnly) params.set('statusFilter', 'auto');
   await apiFetch(`/api/slots/clear?${params}`, { method: 'POST' });
 }

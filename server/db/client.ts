@@ -111,6 +111,12 @@ db.exec(`
 // ─── Schema migrations ────────────────────────────────────────────────────────
 const cadresCols = (db.prepare('PRAGMA table_info(cadres)').all() as { name: string }[]).map(c => c.name);
 
+// Soft-delete: quitte_le stores the departure date (YYYY-MM-DD) when a cadre leaves.
+// NULL means the cadre is still active.
+if (!cadresCols.includes('quitte_le')) {
+  db.exec(`ALTER TABLE cadres ADD COLUMN quitte_le TEXT;`);
+}
+
 if (!cadresCols.includes('prenom')) {
   db.exec(`ALTER TABLE cadres ADD COLUMN prenom TEXT NOT NULL DEFAULT '';`);
 }

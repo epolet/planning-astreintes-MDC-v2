@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
+import { getISOWeek } from 'date-fns';
 import type { Slot, Cadre, DifficultyLevel } from '../types';
 import { DIFFICULTY_LABELS, fullName, totalAstreintes, totalPermanences } from '../types';
 import { getAllPeriodScores, type PerPeriodScore } from '../db/periods';
@@ -608,7 +609,7 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
       permByMonday.set(mon, arr);
     }
 
-    const condensedRows = aSlots.map((aSlot, idx) => {
+    const condensedRows = aSlots.map((aSlot) => {
       // Sunday = Monday + 6 days
       const monDate = new Date(aSlot.date + 'T12:00:00');
       const sunDate = new Date(monDate);
@@ -635,7 +636,7 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
       const holNames = holSlots.map(s => s.cadreName || '(non assigné)').join(' / ');
 
       return {
-        'Semaine':               idx + 1,
+        'Semaine':               getISOWeek(monDate),
         'Du':                    fmtDate(aSlot.date),
         'Au':                    fmtDate(sunIso),
         'Astreinte':             aSlot.cadreName || '',

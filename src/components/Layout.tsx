@@ -15,6 +15,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import PeriodSelector from './PeriodSelector';
+import ToastContainer from './ToastContainer';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Tableau de Bord' },
@@ -109,6 +110,8 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <ToastContainer />
     </div>
   );
 }

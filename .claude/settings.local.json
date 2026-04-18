@@ -21,7 +21,9 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git push *)",
-      "Bash(node -e \"require\\('xlsx-js-style'\\); console.log\\('ok'\\)\")"
+      "Bash(node -e \"require\\('xlsx-js-style'\\); console.log\\('ok'\\)\")",
+      "Bash(grep -o '\"text\":\"[^\"]{0,300}\"' /Users/emmanuelpolet/.claude/projects/-Users-emmanuelpolet-Documents-Pro-mdc-planning-astreintes-mdc-main/1c6deec7-441a-4e2d-a842-58aa1ca967ae.jsonl)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

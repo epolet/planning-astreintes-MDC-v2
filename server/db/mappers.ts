@@ -19,11 +19,11 @@ export function cadreToApp(row: Record<string, unknown>) {
     permanenceD4: (row.permanence_d4 as number) ?? 0,
     permanenceD5: (row.permanence_d5 as number) ?? 0,
     active: row.actif === 1,
+    quitLe: (row.quitte_le as string | null) ?? null,
   };
 }
 
 export const cadreRoleToDb: Record<string, string> = {
-  astreinte: 'Astreinte',
   permanence: 'Permanence',
   both: 'Both',
 };
@@ -98,5 +98,25 @@ export function closedDayToApp(row: Record<string, unknown>) {
     id: row.id,
     date: row.date,
     reason: row.reason,
+  };
+}
+
+/**
+ * Maps an aggregated score row (from SUM queries — no id/periodId columns)
+ * to the camelCase format expected by the frontend cumulative-score endpoints.
+ */
+export function aggregateScoreToApp(row: Record<string, unknown>) {
+  return {
+    cadreId:      row.cadre_id as string,
+    astreinteD1:  (row.astreinte_d1  as number) ?? 0,
+    astreinteD2:  (row.astreinte_d2  as number) ?? 0,
+    astreinteD3:  (row.astreinte_d3  as number) ?? 0,
+    astreinteD4:  (row.astreinte_d4  as number) ?? 0,
+    astreinteD5:  (row.astreinte_d5  as number) ?? 0,
+    permanenceD1: (row.permanence_d1 as number) ?? 0,
+    permanenceD2: (row.permanence_d2 as number) ?? 0,
+    permanenceD3: (row.permanence_d3 as number) ?? 0,
+    permanenceD4: (row.permanence_d4 as number) ?? 0,
+    permanenceD5: (row.permanence_d5 as number) ?? 0,
   };
 }

@@ -6,7 +6,8 @@ import { getSlotsByPeriod } from '../db/slots';
 import { getWishesByPeriod, setSlotWishes } from '../db/wishes';
 import type { Cadre, Slot, DifficultyLevel } from '../types';
 import { fullName, DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '../types';
-import { CheckSquare, Square, Save, Users, AlertCircle, Search } from 'lucide-react';
+import { CheckSquare, Square, Save, Users, AlertCircle, Search, User } from 'lucide-react';
+import { toast } from '../utils/toast';
 
 // ─── Multi-select dropdown component ─────────────────────────────────────────
 
@@ -158,6 +159,7 @@ export default function WishesEntry() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'astreinte' | 'permanence'>('astreinte');
   const [difficultyFilter, setDifficultyFilter] = useState<number | null>(null);
+  const [cadreFilter, setCadreFilter] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activePeriod?.id) { setLoading(false); return; }
@@ -172,7 +174,7 @@ export default function WishesEntry() {
         }
         setWishMap(map);
       })
-      .catch(() => {})
+      .catch(() => { toast.error('Impossible de charger les vœux'); })
       .finally(() => setLoading(false));
   }, [activePeriod]);
 
@@ -241,10 +243,10 @@ export default function WishesEntry() {
   // Difficulty levels present in the current tab, sorted D5 → D1
   const availableDifficulties = [...new Set(tabSlots.map(s => s.difficulty))].sort((a, b) => b - a);
 
-  // Apply difficulty filter
-  const displaySlots = difficultyFilter === null
-    ? tabSlots
-    : tabSlots.filter(s => s.difficulty === difficultyFilter);
+  // Apply difficulty + cadre filters
+  const displaySlots = tabSlots
+    .filter(s => difficultyFilter === null || s.difficulty === difficultyFilter)
+    .filter(s => cadreFilter === null || (wishMap.get(s.id!)?.has(cadreFilter) ?? false));
 
   // For a given slot, return the eligible cadres (Noël astreinte → all cadres)
   function slotEligibleCadres(slot: Slot): Cadre[] {
@@ -278,7 +280,7 @@ export default function WishesEntry() {
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
           <button
-            onClick={() => { setTab('astreinte'); setDifficultyFilter(null); }}
+            onClick={() => { setTab('astreinte'); setDifficultyFilter(null); setCadreFilter(null); }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               tab === 'astreinte'
                 ? 'bg-white text-blue-700 shadow-sm'
@@ -288,7 +290,7 @@ export default function WishesEntry() {
             Astreintes ({astreinteSlots.length})
           </button>
           <button
-            onClick={() => { setTab('permanence'); setDifficultyFilter(null); }}
+            onClick={() => { setTab('permanence'); setDifficultyFilter(null); setCadreFilter(null); }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               tab === 'permanence'
                 ? 'bg-white text-teal-700 shadow-sm'
@@ -333,6 +335,27 @@ export default function WishesEntry() {
             })}
           </div>
         )}
+
+        {/* Cadre filter */}
+        <div className="relative">
+          <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+          <select
+            value={cadreFilter ?? ''}
+            onChange={e => setCadreFilter(e.target.value || null)}
+            className={`pl-8 pr-3 py-1.5 text-xs font-medium bg-white border rounded-lg appearance-none cursor-pointer min-w-[160px] transition-colors ${
+              cadreFilter
+                ? 'border-blue-400 text-blue-700 ring-1 ring-blue-200'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <option value="">Tous les cadres</option>
+            {eligibleCadres.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+              <option key={c.id} value={c.id}>
+                {fullName(c)}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Stats */}
@@ -349,7 +372,9 @@ export default function WishesEntry() {
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         {displaySlots.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">
-            Aucun créneau de ce type dans la période.
+            {cadreFilter
+              ? 'Ce cadre n\'a exprimé aucun vœu sur les créneaux affichés.'
+              : 'Aucun créneau de ce type dans la période.'}
           </div>
         ) : (
           <table className="w-full">

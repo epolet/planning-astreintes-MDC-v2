@@ -14,8 +14,14 @@ router.post('/reset-scores', (_req, res) => {
   res.json({ ok: true });
 });
 
+// GET /archived — departed cadres (quitte_le IS NOT NULL). Must be before /:id.
+router.get('/archived', (_req, res) => {
+  const rows = db.prepare('SELECT * FROM cadres WHERE quitte_le IS NOT NULL ORDER BY nom').all();
+  res.json(rows.map(r => cadreToApp(r as Record<string, unknown>)));
+});
+
 router.get('/', (_req, res) => {
-  const rows = db.prepare('SELECT * FROM cadres ORDER BY nom').all();
+  const rows = db.prepare('SELECT * FROM cadres WHERE quitte_le IS NULL ORDER BY nom').all();
   res.json(rows.map(r => cadreToApp(r as Record<string, unknown>)));
 });
 
@@ -78,8 +84,17 @@ router.patch('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /:id/restore — un-archive a departed cadre. Must be before /:id.
+router.post('/:id/restore', (req, res) => {
+  db.prepare('UPDATE cadres SET quitte_le = NULL, actif = 1 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// DELETE /:id — soft delete: records departure date instead of deleting the row.
+// Historical slots keep their cadre_id so past planning is preserved.
 router.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM cadres WHERE id = ?').run(req.params.id);
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  db.prepare('UPDATE cadres SET quitte_le = ?, actif = 0 WHERE id = ?').run(today, req.params.id);
   res.json({ ok: true });
 });
 

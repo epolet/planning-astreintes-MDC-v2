@@ -1,37 +1,29 @@
 import { useState, useEffect } from 'react';
 import { usePeriod } from '../context/PeriodContext';
-import { getCadres } from '../db/cadres';
-import { getSlotsByPeriod } from '../db/slots';
 import { getPeriodScores } from '../db/periods';
+import { useCadres } from '../hooks/useCadres';
+import { usePeriodSlots } from '../hooks/usePeriodSlots';
+import { toast } from '../utils/toast';
 import EquityChart from '../components/EquityChart';
 import DifficultyBadge from '../components/DifficultyBadge';
 import { DIFFICULTY_COLORS, totalAstreintes, totalPermanences, ZERO_COUNTERS } from '../types';
-import type { Cadre, Slot, DifficultyLevel, PeriodScore } from '../types';
-import { exportToExcel } from '../utils/export';
+import type { DifficultyLevel, PeriodScore } from '../types';
 import { Users, CalendarDays, BarChart3, AlertTriangle, Download, Lock, Pencil } from 'lucide-react';
 
 export default function Dashboard() {
   const { activePeriod } = usePeriod();
-  const [cadres, setCadres] = useState<Cadre[]>([]);
-  const [slots, setSlots] = useState<Slot[]>([]);
+  const { cadres, loading } = useCadres();
+  const { slots } = usePeriodSlots(activePeriod?.id);
   const [periodScores, setPeriodScores] = useState<PeriodScore[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getCadres()
-      .then(setCadres)
-      .catch(() => setCadres([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (activePeriod?.id) {
-      getSlotsByPeriod(activePeriod.id).then(setSlots).catch(() => setSlots([]));
-      getPeriodScores(activePeriod.id).then(setPeriodScores).catch(() => setPeriodScores([]));
-    } else {
-      setSlots([]);
-      setPeriodScores([]);
-    }
+    if (!activePeriod?.id) { setPeriodScores([]); return; }
+    getPeriodScores(activePeriod.id)
+      .then(setPeriodScores)
+      .catch(() => {
+        toast.error('Impossible de charger les scores de la période');
+        setPeriodScores([]);
+      });
   }, [activePeriod]);
 
   if (loading) {
@@ -96,7 +88,10 @@ export default function Dashboard() {
         </div>
         {slots.length > 0 && (
           <button
-            onClick={() => exportToExcel(slots, cadresWithPeriodScores, activePeriod?.id)}
+            onClick={async () => {
+                const { exportToExcel } = await import('../utils/export');
+                await exportToExcel(slots, cadresWithPeriodScores, activePeriod?.id);
+              }}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             <Download className="w-4 h-4" />

@@ -2,35 +2,22 @@ import { useState, useMemo, useEffect } from 'react';
 import { format, addMonths, subMonths, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { getVacations } from '../db/config';
-import { getSlotsByPeriod } from '../db/slots';
 import { usePeriod } from '../context/PeriodContext';
 import CalendarGrid from '../components/CalendarGrid';
 import SlotModal from '../components/SlotModal';
-import type { Slot, VacationPeriod } from '../types';
+import { useVacations } from '../hooks/useConfig';
+import { usePeriodSlots } from '../hooks/usePeriodSlots';
+import type { Slot } from '../types';
 
 export default function CalendarView() {
   const { activePeriod } = usePeriod();
-  const [vacations, setVacations] = useState<VacationPeriod[] | null>(null);
-
-  useEffect(() => {
-    getVacations().then(setVacations).catch(() => setVacations([]));
-  }, []);
-
-  const [slots, setSlots] = useState<Slot[]>([]);
+  const vacations = useVacations();
+  const { slots, refresh: refreshSlots } = usePeriodSlots(activePeriod?.id);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   const [daySlots, setDaySlots] = useState<Slot[]>([]);
   const [daySlotIndex, setDaySlotIndex] = useState(0);
   const [filter, setFilter] = useState<'all' | 'astreinte' | 'permanence'>('all');
-
-  useEffect(() => {
-    if (activePeriod?.id) {
-      getSlotsByPeriod(activePeriod.id).then(setSlots).catch(() => setSlots([]));
-    } else {
-      setSlots([]);
-    }
-  }, [activePeriod]);
 
   useEffect(() => {
     if (currentDate || !activePeriod?.startDate) return;
@@ -61,9 +48,7 @@ export default function CalendarView() {
     setSelectedSlot(null);
     setDaySlots([]);
     setDaySlotIndex(0);
-    if (activePeriod?.id) {
-      getSlotsByPeriod(activePeriod.id).then(setSlots).catch(() => setSlots([]));
-    }
+    refreshSlots();
   }
 
   function navigateSlot(dir: number) {

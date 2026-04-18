@@ -1,14 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getCadres, addCadre, updateCadre, deleteCadre, countSlotsByCadre, resetAllScores } from '../db/cadres';
+import {
+  getCadres, addCadre, updateCadre, archiveCadre, countSlotsByCadre, resetAllScores,
+  getArchivedCadres, restoreCadre,
+} from '../db/cadres';
 import type { Cadre } from '../types';
 import { totalAstreintes, totalPermanences, ZERO_COUNTERS, fullName } from '../types';
-import { Plus, Pencil, Trash2, UserCheck, UserX, MapPin, RotateCcw, AlertTriangle } from 'lucide-react';
+import {
+  Plus, Pencil, Archive, UserCheck, UserX, MapPin, RotateCcw, AlertTriangle, ChevronDown, ChevronUp,
+} from 'lucide-react';
 
 export default function CadreManagement() {
   const [cadres, setCadres] = useState<Cadre[]>([]);
+  const [archivedCadres, setArchivedCadres] = useState<Cadre[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Cadre | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [form, setForm] = useState({
     name: '',
     prenom: '',
@@ -16,12 +23,12 @@ export default function CadreManagement() {
     nearMuseum: true,
   });
   const [showResetDialog, setShowResetDialog] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; slotCount: number } | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<{ id: string; name: string; slotCount: number } | null>(null);
 
   const refresh = useCallback(() => {
-    getCadres()
-      .then(setCadres)
-      .catch(() => setCadres([]))
+    Promise.all([getCadres(), getArchivedCadres()])
+      .then(([active, archived]) => { setCadres(active); setArchivedCadres(archived); })
+      .catch(() => { setCadres([]); setArchivedCadres([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -79,15 +86,20 @@ export default function CadreManagement() {
     refresh();
   }
 
-  async function handleDeleteClick(cadre: Cadre) {
+  async function handleArchiveClick(cadre: Cadre) {
     const count = await countSlotsByCadre(cadre.id!);
-    setDeleteTarget({ id: cadre.id!, name: fullName(cadre), slotCount: count });
+    setArchiveTarget({ id: cadre.id!, name: fullName(cadre), slotCount: count });
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    await deleteCadre(deleteTarget.id);
-    setDeleteTarget(null);
+  async function confirmArchive() {
+    if (!archiveTarget) return;
+    await archiveCadre(archiveTarget.id);
+    setArchiveTarget(null);
+    refresh();
+  }
+
+  async function handleRestore(cadre: Cadre) {
+    await restoreCadre(cadre.id!);
     refresh();
   }
 
@@ -101,6 +113,9 @@ export default function CadreManagement() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Gestion des Cadres</h2>
           <p className="text-sm text-slate-500 mt-1">
             {astreinteCadres.length} astreinte, {permanenceCadres.length} permanence
+            {archivedCadres.length > 0 && (
+              <span className="ml-2 text-slate-400">· {archivedCadres.length} archivé{archivedCadres.length > 1 ? 's' : ''}</span>
+            )}
           </p>
         </div>
         <button
@@ -175,7 +190,7 @@ export default function CadreManagement() {
               type="submit"
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
-              {editing ? 'Mettre a jour' : 'Ajouter'}
+              {editing ? 'Mettre à jour' : 'Ajouter'}
             </button>
             <button
               type="button"
@@ -188,14 +203,15 @@ export default function CadreManagement() {
         </form>
       )}
 
+      {/* ── Active cadres table ── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Nom</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Proximite</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Rôle</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Proximité</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Astr.</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Perm.</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Tot.</th>
@@ -258,14 +274,16 @@ export default function CadreManagement() {
                       <button
                         onClick={() => startEdit(cadre)}
                         className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                        title="Modifier"
                       >
                         <Pencil className="w-3.5 h-3.5 text-slate-500" />
                       </button>
                       <button
-                        onClick={() => handleDeleteClick(cadre)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                        onClick={() => handleArchiveClick(cadre)}
+                        className="p-1.5 rounded-lg hover:bg-amber-50 transition-colors"
+                        title="Archiver (départ)"
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                        <Archive className="w-3.5 h-3.5 text-amber-500" />
                       </button>
                     </div>
                   </td>
@@ -277,12 +295,73 @@ export default function CadreManagement() {
         {cadres.length === 0 && (
           <div className="p-12 text-center">
             <p className="text-slate-400 text-sm">
-              Aucun cadre enregistre. Cliquez sur "Ajouter un cadre" pour commencer.
+              Aucun cadre actif. Cliquez sur "Ajouter un cadre" pour commencer.
             </p>
           </div>
         )}
       </div>
 
+      {/* ── Archived cadres section ── */}
+      {archivedCadres.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          <button
+            onClick={() => setShowArchived(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-4 text-sm font-semibold text-slate-600 hover:bg-slate-50/60 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Archive className="w-4 h-4 text-slate-400" />
+              Cadres archivés ({archivedCadres.length})
+            </span>
+            {showArchived ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showArchived && (
+            <div className="border-t border-slate-100 overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50/60 border-b border-slate-100">
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Nom</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Rôle</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Départ</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {archivedCadres.map(cadre => (
+                    <tr key={cadre.id} className="opacity-60 hover:opacity-80 transition-opacity">
+                      <td className="px-4 py-3 text-sm font-medium text-slate-700">{fullName(cadre)}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-500">
+                          {cadre.role === 'both' ? 'Astr. & Perm.' : cadre.role === 'astreinte' ? 'Astreinte' : 'Permanence'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {cadre.quitLe ? new Date(cadre.quitLe).toLocaleDateString('fr-FR') : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => handleRestore(cadre)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                          title="Restaurer ce cadre"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          Restaurer
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="px-5 py-3 text-[11px] text-slate-400 border-t border-slate-50">
+                Les créneaux passés restent associés à ces cadres pour l'historique.
+                Ils n'apparaissent pas dans les exports Excel.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Reset scores ── */}
       {cadres.length > 0 && (
         <div className="bg-white rounded-xl border border-red-200/60 p-5 shadow-sm">
           <div className="flex items-center justify-between">
@@ -291,55 +370,54 @@ export default function CadreManagement() {
                 <RotateCcw className="w-4 h-4 text-red-600" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">Reinitialiser tous les scores</p>
-                <p className="text-xs text-slate-500">Remet a zero les scores globaux de tous les cadres</p>
+                <p className="text-sm font-semibold text-slate-900">Réinitialiser tous les scores</p>
+                <p className="text-xs text-slate-500">Remet à zéro les scores globaux de tous les cadres</p>
               </div>
             </div>
             <button
               onClick={() => setShowResetDialog(true)}
               className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
             >
-              Reinitialiser
+              Réinitialiser
             </button>
           </div>
         </div>
       )}
 
-      {deleteTarget && (
+      {/* ── Archive confirmation dialog ── */}
+      {archiveTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteTarget(null)} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setArchiveTarget(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div className="p-6 text-center">
-              <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-7 h-7 text-red-600" />
+              <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-7 h-7 text-amber-600" />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Supprimer {deleteTarget.name} ?</h3>
-              {deleteTarget.slotCount > 0 ? (
-                <p className="text-sm text-slate-600 mb-1">
-                  Ce cadre est assigne a{' '}
-                  <span className="font-semibold text-red-700">{deleteTarget.slotCount} creneau{deleteTarget.slotCount > 1 ? 'x' : ''}</span>.
-                  Ces creneaux seront desassignes.
-                </p>
-              ) : (
-                <p className="text-sm text-slate-600 mb-1">
-                  Ce cadre n'a aucun creneau assigne.
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Archiver {archiveTarget.name} ?</h3>
+              <p className="text-sm text-slate-600 mb-2">
+                Ce cadre ne figurera plus dans la liste active ni dans les exports Excel.
+              </p>
+              {archiveTarget.slotCount > 0 && (
+                <p className="text-sm text-slate-500 mb-2">
+                  Ses <span className="font-semibold">{archiveTarget.slotCount} créneaux</span> passés
+                  restent visibles dans l'historique des périodes.
                 </p>
               )}
-              <p className="text-sm font-semibold text-red-700 mb-6">
-                Cette suppression est definitive et irreversible.
+              <p className="text-xs text-slate-400 mb-6">
+                Vous pourrez le restaurer depuis la section "Cadres archivés".
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setDeleteTarget(null)}
+                  onClick={() => setArchiveTarget(null)}
                   className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
                 >
                   Annuler
                 </button>
                 <button
-                  onClick={confirmDelete}
-                  className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+                  onClick={confirmArchive}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
                 >
-                  Supprimer
+                  Archiver
                 </button>
               </div>
             </div>
@@ -347,6 +425,7 @@ export default function CadreManagement() {
         </div>
       )}
 
+      {/* ── Reset scores dialog ── */}
       {showResetDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowResetDialog(false)} />
@@ -357,10 +436,10 @@ export default function CadreManagement() {
               </div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">Attention</h3>
               <p className="text-sm text-slate-600 mb-1">
-                Vous allez remettre a zero tous les scores cumules de l'ensemble des cadres.
+                Vous allez remettre à zéro tous les scores cumulés de l'ensemble des cadres.
               </p>
               <p className="text-sm font-semibold text-red-700 mb-6">
-                Cette modification est definitive et irreversible.
+                Cette modification est définitive et irréversible.
               </p>
               <div className="flex gap-3">
                 <button
@@ -373,7 +452,7 @@ export default function CadreManagement() {
                   onClick={handleResetAllScores}
                   className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
                 >
-                  Confirmer la remise a zero
+                  Confirmer la remise à zéro
                 </button>
               </div>
             </div>
