@@ -634,6 +634,190 @@ function buildWishCountSheet(
   return ws;
 }
 
+/** Construit la feuille "Récap équité pluriannuel" :
+ *  Deux tableaux empilés verticalement (Astreintes puis Permanences).
+ *  Colonnes : Cadre | D2 D3 D4 Noël Total par année civile | Cumul D2 D3 D4 Noël Total.
+ *  Les périodes chevauchant deux années (ex. Déc–Juin) sont rattachées à l'année
+ *  du point médian de la période (ex. mars 2026 → 2026). */
+function buildPluriannualEquitySheet(
+  rawCadres: Cadre[],
+  allPeriodScores: PerPeriodScore[]
+): XLSX.WorkSheet {
+  const activeCadres    = rawCadres.filter(c => c.active);
+  const astreinteCadres = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
+  const allYears = [...new Set(allPeriodScores.map(ps => periodYear(ps)))].sort();
+
+  if (allYears.length === 0 || activeCadres.length === 0) {
+    return XLSX.utils.aoa_to_sheet([[sc('Aucune donnée historique disponible.', {})]]);
+  }
+
+  // ── Difficulty config ──────────────────────────────────────────────────────
+  type DiffKey = 'd2' | 'd3' | 'd4' | 'd5' | 'total';
+  const DIFF_KEYS: DiffKey[] = ['d2', 'd3', 'd4', 'd5', 'total'];
+  const DIFF_LABEL: Record<DiffKey, string> = { d2: 'D2', d3: 'D3', d4: 'D4', d5: '🎄 Noël', total: 'Total' };
+  const D_STYLE: Record<DiffKey, { bg: string; text: string; hdr: string }> = {
+    d2:    { bg: C.amber50,  text: C.amber600,  hdr: C.amber400  },
+    d3:    { bg: C.orange50, text: C.orange600, hdr: C.orange400 },
+    d4:    { bg: C.red50,    text: C.red600,    hdr: C.red500    },
+    d5:    { bg: C.purple50, text: C.purple700, hdr: C.purple500 },
+    total: { bg: C.slate100, text: C.slate900,  hdr: C.slate500  },
+  };
+  const COLS_PER_YEAR = DIFF_KEYS.length; // 5
+  const TOTAL_COLS = 1 + allYears.length * COLS_PER_YEAR + COLS_PER_YEAR;
+  const YEAR_COLORS = [C.blue700, C.blue800];
+
+  // ── AOA state ─────────────────────────────────────────────────────────────
+  const aoa: (SCell | string)[][] = [];
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+  let r = 0;
+
+  const empty   = (): SCell  => sc('', {});
+  const emptyRow = (): SCell[] => Array(TOTAL_COLS).fill(empty());
+
+  // ── Helper: year-group + sub-header rows ──────────────────────────────────
+  function appendHeaders() {
+    // Year group row
+    const yearRow: SCell[] = [sc('', { fill: fill(C.slate100) })];
+    for (let yi = 0; yi < allYears.length; yi++) {
+      const yr = allYears[yi];
+      const hasDraft = allPeriodScores.some(ps => periodYear(ps) === yr && ps.periodStatus === 'draft');
+      const label = yr + (hasDraft ? ' (en cours)' : '');
+      const yrStyle: XStyle = { fill: fill(YEAR_COLORS[yi % 2]), font: { bold: true, color: { rgb: C.white }, sz: 11 }, alignment: { horizontal: 'center' } };
+      const startCol = 1 + yi * COLS_PER_YEAR;
+      for (let k = 0; k < COLS_PER_YEAR; k++) yearRow.push(sc(k === 0 ? label : '', yrStyle));
+      merges.push({ s: { r, c: startCol }, e: { r, c: startCol + COLS_PER_YEAR - 1 } });
+    }
+    const cumulStart = 1 + allYears.length * COLS_PER_YEAR;
+    const cumulStyle: XStyle = { fill: fill(C.slate900), font: { bold: true, color: { rgb: C.white }, sz: 11 }, alignment: { horizontal: 'center' } };
+    for (let k = 0; k < COLS_PER_YEAR; k++) yearRow.push(sc(k === 0 ? 'CUMUL' : '', cumulStyle));
+    merges.push({ s: { r, c: cumulStart }, e: { r, c: cumulStart + COLS_PER_YEAR - 1 } });
+    aoa.push(yearRow); r++;
+
+    // Sub-header row (Cadre | D2 D3 D4 Noël Total per year | D2 D3 D4 Noël Total cumul)
+    const cadreHdr: XStyle = { fill: fill(C.slate100), font: { bold: true, color: { rgb: C.slate500 } }, alignment: { horizontal: 'left' }, border: border() };
+    const subRow: SCell[] = [sc('Cadre', cadreHdr)];
+    for (let yi = 0; yi < allYears.length; yi++) {
+      for (const key of DIFF_KEYS) {
+        subRow.push(sc(DIFF_LABEL[key], { fill: fill(D_STYLE[key].hdr), font: { bold: true, color: { rgb: C.white }, sz: 9 }, alignment: { horizontal: 'center' }, border: border() }));
+      }
+    }
+    for (const key of DIFF_KEYS) {
+      subRow.push(sc(DIFF_LABEL[key], { fill: fill(D_STYLE[key].hdr), font: { bold: true, color: { rgb: C.white }, sz: 9 }, alignment: { horizontal: 'center' }, border: border(C.slate600) }));
+    }
+    aoa.push(subRow); r++;
+  }
+
+  // ── Helper: data rows + total row for a given cadre set & extractor ───────
+  type YDRaw = { d2: number; d3: number; d4: number; d5: number };
+  function appendData(tableCadres: Cadre[], extract: (cadre: Cadre, yr: string) => YDRaw) {
+    // Sort descending by cumul total
+    const sorted = [...tableCadres].sort((a, b) => {
+      const tot = (c: Cadre) => allYears.reduce((s, yr) => { const yd = extract(c, yr); return s + yd.d2 + yd.d3 + yd.d4 + yd.d5; }, 0);
+      return tot(b) - tot(a);
+    });
+
+    for (let ci = 0; ci < sorted.length; ci++) {
+      const cadre = sorted[ci];
+      const rowBg = ci % 2 === 0 ? C.white : C.slate50;
+      const row: SCell[] = [sc(fullName(cadre), { fill: fill(rowBg), font: { color: { rgb: C.slate900 } }, border: border() })];
+      let cumD2 = 0, cumD3 = 0, cumD4 = 0, cumD5 = 0;
+      for (const yr of allYears) {
+        const yd = extract(cadre, yr);
+        cumD2 += yd.d2; cumD3 += yd.d3; cumD4 += yd.d4; cumD5 += yd.d5;
+        const vals: Record<DiffKey, number> = { d2: yd.d2, d3: yd.d3, d4: yd.d4, d5: yd.d5, total: yd.d2 + yd.d3 + yd.d4 + yd.d5 };
+        for (const key of DIFF_KEYS) {
+          const val = vals[key];
+          const ds = D_STYLE[key];
+          row.push(sc(val, { fill: fill(val > 0 ? ds.bg : rowBg), font: { bold: val > 0, color: { rgb: val > 0 ? ds.text : C.slate300 } }, alignment: { horizontal: 'center' }, border: border() }));
+        }
+      }
+      const cumVals: Record<DiffKey, number> = { d2: cumD2, d3: cumD3, d4: cumD4, d5: cumD5, total: cumD2 + cumD3 + cumD4 + cumD5 };
+      for (const key of DIFF_KEYS) {
+        const val = cumVals[key];
+        const ds = D_STYLE[key];
+        row.push(sc(val, { fill: fill(val > 0 ? ds.bg : C.slate50), font: { bold: val > 0, color: { rgb: val > 0 ? ds.text : C.slate300 } }, alignment: { horizontal: 'center' }, border: border(C.slate400) }));
+      }
+      aoa.push(row); r++;
+    }
+
+    // Total row
+    const totalRow: SCell[] = [sc('TOTAL', { fill: fill(C.slate200), font: { bold: true, color: { rgb: C.slate900 } }, border: border(C.slate400) })];
+    let gD2 = 0, gD3 = 0, gD4 = 0, gD5 = 0;
+    for (const yr of allYears) {
+      let yrD2 = 0, yrD3 = 0, yrD4 = 0, yrD5 = 0;
+      for (const c of tableCadres) { const yd = extract(c, yr); yrD2 += yd.d2; yrD3 += yd.d3; yrD4 += yd.d4; yrD5 += yd.d5; }
+      gD2 += yrD2; gD3 += yrD3; gD4 += yrD4; gD5 += yrD5;
+      const yrVals: Record<DiffKey, number> = { d2: yrD2, d3: yrD3, d4: yrD4, d5: yrD5, total: yrD2 + yrD3 + yrD4 + yrD5 };
+      for (const key of DIFF_KEYS) {
+        const val = yrVals[key]; const ds = D_STYLE[key];
+        totalRow.push(sc(val, { fill: fill(ds.bg), font: { bold: true, color: { rgb: ds.text } }, alignment: { horizontal: 'center' }, border: border(C.slate400) }));
+      }
+    }
+    const gVals: Record<DiffKey, number> = { d2: gD2, d3: gD3, d4: gD4, d5: gD5, total: gD2 + gD3 + gD4 + gD5 };
+    for (const key of DIFF_KEYS) {
+      const val = gVals[key]; const ds = D_STYLE[key];
+      totalRow.push(sc(val, { fill: fill(ds.bg), font: { bold: true, color: { rgb: ds.text } }, alignment: { horizontal: 'center' }, border: border(C.slate600) }));
+    }
+    aoa.push(totalRow); r++;
+  }
+
+  // ── Extractors — somme toutes les périodes appartenant à l'année ──────────
+  const extractAstr = (cadre: Cadre, yr: string): YDRaw => {
+    const scores = allPeriodScores.filter(ps => ps.cadreId === cadre.id && periodYear(ps) === yr);
+    return {
+      d2: scores.reduce((s, ps) => s + ps.astreinteD2, 0),
+      d3: scores.reduce((s, ps) => s + ps.astreinteD3, 0),
+      d4: scores.reduce((s, ps) => s + ps.astreinteD4, 0),
+      d5: scores.reduce((s, ps) => s + ps.astreinteD5, 0),
+    };
+  };
+  const extractPerm = (cadre: Cadre, yr: string): YDRaw => {
+    const scores = allPeriodScores.filter(ps => ps.cadreId === cadre.id && periodYear(ps) === yr);
+    return {
+      d2: scores.reduce((s, ps) => s + ps.permanenceD2, 0),
+      d3: scores.reduce((s, ps) => s + ps.permanenceD3, 0),
+      d4: scores.reduce((s, ps) => s + ps.permanenceD4, 0),
+      d5: scores.reduce((s, ps) => s + ps.permanenceD5, 0),
+    };
+  };
+
+  // ── Main title ─────────────────────────────────────────────────────────────
+  const titleStyle: XStyle = { fill: fill(C.slate900), font: { bold: true, color: { rgb: C.white }, sz: 13 }, alignment: { horizontal: 'center', vertical: 'center' } };
+  aoa.push([sc('RÉCAP ÉQUITÉ PLURIANNUEL — Créneaux difficiles par cadre et par année (D2 / D3 / D4 / Noël)', titleStyle), ...Array(TOTAL_COLS - 1).fill(sc('', titleStyle))]);
+  merges.push({ s: { r, c: 0 }, e: { r, c: TOTAL_COLS - 1 } }); r++;
+  aoa.push(emptyRow()); r++;
+
+  // ── Table 1 : ASTREINTES ──────────────────────────────────────────────────
+  const sAst: XStyle = { fill: fill(C.blue700), font: { bold: true, color: { rgb: C.white }, sz: 12 }, alignment: { horizontal: 'center' } };
+  aoa.push([sc('📅 ASTREINTES', sAst), ...Array(TOTAL_COLS - 1).fill(sc('', sAst))]);
+  merges.push({ s: { r, c: 0 }, e: { r, c: TOTAL_COLS - 1 } }); r++;
+  appendHeaders();
+  appendData(astreinteCadres, extractAstr);
+
+  // ── Separator ─────────────────────────────────────────────────────────────
+  aoa.push(emptyRow()); r++;
+  aoa.push(emptyRow()); r++;
+
+  // ── Table 2 : PERMANENCES ─────────────────────────────────────────────────
+  const sPerm: XStyle = { fill: fill(C.teal700), font: { bold: true, color: { rgb: C.white }, sz: 12 }, alignment: { horizontal: 'center' } };
+  aoa.push([sc('🗓 PERMANENCES', sPerm), ...Array(TOTAL_COLS - 1).fill(sc('', sPerm))]);
+  merges.push({ s: { r, c: 0 }, e: { r, c: TOTAL_COLS - 1 } }); r++;
+  appendHeaders();
+  appendData(activeCadres, extractPerm);
+
+  // ── Build worksheet ────────────────────────────────────────────────────────
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = merges;
+  const colWidths: { width: number }[] = [{ width: 22 }];
+  for (let yi = 0; yi < allYears.length; yi++) {
+    for (let k = 0; k < COLS_PER_YEAR; k++) colWidths.push({ width: k === COLS_PER_YEAR - 1 ? 8 : 6 });
+  }
+  for (let k = 0; k < COLS_PER_YEAR; k++) colWidths.push({ width: k === COLS_PER_YEAR - 1 ? 9 : 7 });
+  ws['!cols'] = colWidths;
+
+  return ws;
+}
+
 export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: string) {
   const wb = XLSX.utils.book_new();
 
@@ -641,6 +825,11 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
   // Dashboard merges PeriodScore counters via spread, which overwrites cadre.id).
   let rawCadres: Cadre[] = cadres;
   try { rawCadres = await getCadres(); } catch { /* fall back */ }
+
+  // Fetch historical period scores early so the pluriannual sheet can be
+  // placed right after "Récap Équité".
+  let allPeriodScores: PerPeriodScore[] = [];
+  try { allPeriodScores = await getAllPeriodScores(); } catch { /* non-blocking */ }
 
   // ── Sheet 1: Planning chronologique ──────────────────────────────────────────
   const planningData = slots
@@ -834,6 +1023,12 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
   const wsEquity = buildEquitySheet(rawCadres);
   XLSX.utils.book_append_sheet(wb, wsEquity, 'Récap Équité');
 
+  // ── Sheet: Récap équité pluriannuel ─────────────────────────────────────────
+  if (allPeriodScores.length > 0) {
+    const wsPluriannual = buildPluriannualEquitySheet(rawCadres, allPeriodScores);
+    XLSX.utils.book_append_sheet(wb, wsPluriannual, 'Recap équité pluriannuel');
+  }
+
   // ── Sheet 4: Vœux par créneau ────────────────────────────────────────────────
   if (periodId) {
     let wishMap: Map<string, string[]> = new Map();
@@ -883,14 +1078,6 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
       const wsWishCount = buildWishCountSheet(slots, rawCadres, wishMap);
       XLSX.utils.book_append_sheet(wb, wsWishCount, 'Nb de vœux');
     }
-  }
-
-  // ── Fetch historical period scores ────────────────────────────────────────────
-  let allPeriodScores: PerPeriodScore[] = [];
-  try {
-    allPeriodScores = await getAllPeriodScores();
-  } catch {
-    // non-blocking — historical data will just be absent
   }
 
   // Group by cadreId

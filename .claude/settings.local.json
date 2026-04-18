@@ -23,7 +23,10 @@
       "Bash(git push *)",
       "Bash(node -e \"require\\('xlsx-js-style'\\); console.log\\('ok'\\)\")",
       "Bash(grep -o '\"text\":\"[^\"]{0,300}\"' /Users/emmanuelpolet/.claude/projects/-Users-emmanuelpolet-Documents-Pro-mdc-planning-astreintes-mdc-main/1c6deec7-441a-4e2d-a842-58aa1ca967ae.jsonl)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(sqlite3 data/planning.db \"SELECT id, label, start_date, end_date, status FROM planning_periods ORDER BY start_date;\")",
+      "Bash(sqlite3 data/planning.db \"SELECT ps.period_id, pp.label, pp.start_date, pp.end_date, COUNT\\(*\\) as cadre_count, SUM\\(ps.astreinte_d2+ps.astreinte_d3+ps.astreinte_d4+ps.astreinte_d5\\) as total_diff_astr FROM period_scores ps JOIN planning_periods pp ON ps.period_id = pp.id GROUP BY ps.period_id;\")",
+      "Bash(node -e ' *)"
     ]
   }
 }
