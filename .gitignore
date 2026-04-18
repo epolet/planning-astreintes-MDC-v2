@@ -26,3 +26,6 @@ dist-ssr
 data/planning.db
 data/planning.db-shm
 data/planning.db-wal
+data/backup/planning.db
+data/backup/planning.db-shm
+data/backup/planning.db-wal

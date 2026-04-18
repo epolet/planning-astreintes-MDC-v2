@@ -257,6 +257,15 @@ export default function WishesEntry() {
   const totalWishes = displaySlots.reduce((n, s) => n + (wishMap.get(s.id!)?.size ?? 0), 0);
   const slotsWithWishes = displaySlots.filter(s => (wishMap.get(s.id!)?.size ?? 0) > 0).length;
 
+  // Wish count per cadre across ALL slots of the current tab (not filtered)
+  const wishCountByCadre = eligibleCadres
+    .map(c => ({
+      cadre: c,
+      count: tabSlots.filter(s => wishMap.get(s.id!)?.has(c.id!) ?? false).length,
+    }))
+    .sort((a, b) => a.count - b.count || a.cadre.name.localeCompare(b.cadre.name));
+  const maxWishCount = wishCountByCadre[0]?.count ?? 0;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -446,6 +455,54 @@ export default function WishesEntry() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Summary table: wish count per cadre */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Récapitulatif des vœux — {tab === 'astreinte' ? 'Astreintes' : 'Permanences'} (période complète)
+          </h3>
+        </div>
+        {wishCountByCadre.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-slate-400 text-center">Aucun cadre éligible.</p>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 w-8">#</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-400">Cadre</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-400 text-right w-28">Vœux</th>
+                <th className="px-4 py-2.5 w-48 hidden sm:table-cell" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {wishCountByCadre.map(({ cadre, count }, idx) => (
+                <tr
+                  key={cadre.id}
+                  className={`transition-colors ${cadreFilter === cadre.id ? 'bg-blue-50' : 'hover:bg-slate-50/50'}`}
+                >
+                  <td className="px-4 py-2.5 text-xs text-slate-400 tabular-nums">{idx + 1}</td>
+                  <td className="px-4 py-2.5 text-sm text-slate-700 font-medium">{fullName(cadre)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    <span className={`text-sm font-semibold ${count === 0 ? 'text-slate-300' : count === maxWishCount ? 'text-blue-600' : 'text-slate-700'}`}>
+                      {count}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">/ {tabSlots.length}</span>
+                  </td>
+                  <td className="px-4 py-2.5 hidden sm:table-cell">
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${count === 0 ? 'bg-slate-200' : 'bg-blue-400'}`}
+                        style={{ width: `${tabSlots.length > 0 ? (count / tabSlots.length) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}

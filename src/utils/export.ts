@@ -533,6 +533,107 @@ const ruleDiffNum = (colIdx: number) => (val: unknown, rowBg: string): XStyle =>
   };
 };
 
+/** Construit la feuille "Nb de vœux" : deux tableaux côte à côte (astreintes | permanences) */
+function buildWishCountSheet(
+  slots: Slot[],
+  rawCadres: Cadre[],
+  wishMap: Map<string, string[]>
+): XLSX.WorkSheet {
+  const activeCadres    = rawCadres.filter(c => c.active);
+  const astreinteCadres = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
+
+  const astreinteSlots   = slots.filter(s => s.type === 'astreinte');
+  const permanenceSlots  = slots.filter(s => s.type === 'permanence');
+
+  const countFor = (cadreId: string, slotList: Slot[]) =>
+    slotList.filter(s => (wishMap.get(s.id!) ?? []).includes(cadreId)).length;
+
+  // Sorted ascending (lowest wish count first)
+  const astrRows = astreinteCadres
+    .map(c => ({ cadre: c, count: countFor(c.id!, astreinteSlots) }))
+    .sort((a, b) => a.count - b.count || a.cadre.name.localeCompare(b.cadre.name));
+
+  const permRows = activeCadres
+    .map(c => ({ cadre: c, count: countFor(c.id!, permanenceSlots) }))
+    .sort((a, b) => a.count - b.count || a.cadre.name.localeCompare(b.cadre.name));
+
+  const maxAstr = astrRows[astrRows.length - 1]?.count ?? 0;
+  const maxPerm = permRows[permRows.length - 1]?.count ?? 0;
+
+  const aoa: (SCell | string)[][] = [];
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+
+  const empty = () => sc('', {});
+
+  // ── Row 0: section titles ──────────────────────────────────────────────────
+  const hdrAst:  XStyle = { fill: fill(C.blue700),  font: { bold: true, color: { rgb: C.white }, sz: 11 }, alignment: { horizontal: 'center', vertical: 'center' } };
+  const hdrPerm: XStyle = { fill: fill(C.teal700),  font: { bold: true, color: { rgb: C.white }, sz: 11 }, alignment: { horizontal: 'center', vertical: 'center' } };
+
+  aoa.push([
+    sc(`📅 ASTREINTES (${astreinteSlots.length} créneaux)`, hdrAst), sc('', hdrAst),
+    empty(),
+    sc(`🗓 PERMANENCES (${permanenceSlots.length} créneaux)`, hdrPerm), sc('', hdrPerm),
+  ]);
+  merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } });
+  merges.push({ s: { r: 0, c: 3 }, e: { r: 0, c: 4 } });
+
+  // ── Row 1: column headers ──────────────────────────────────────────────────
+  const colHdr = (align: 'left' | 'center' = 'left'): XStyle => ({
+    fill: fill(C.slate100), font: { bold: true, color: { rgb: C.slate500 } },
+    alignment: { horizontal: align }, border: border(),
+  });
+  aoa.push([
+    sc('Cadre', colHdr()),          sc('Nb de vœux', colHdr('center')),
+    empty(),
+    sc('Cadre', colHdr()),          sc('Nb de vœux', colHdr('center')),
+  ]);
+
+  // ── Data rows ──────────────────────────────────────────────────────────────
+  const maxLen = Math.max(astrRows.length, permRows.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const aItem = astrRows[i];
+    const pItem = permRows[i];
+    const rowBg = i % 2 === 0 ? C.white : C.slate50;
+
+    const nameCell = (label: string): SCell =>
+      sc(label, { fill: fill(rowBg), font: { color: { rgb: C.slate900 } }, border: border() });
+
+    const numCell = (count: number, isAst: boolean): SCell => {
+      if (count === 0) return sc(count, { fill: fill(rowBg), font: { color: { rgb: C.slate300 } }, alignment: { horizontal: 'center' }, border: border() });
+      if (count === (isAst ? maxAstr : maxPerm) && count > 0)
+        return sc(count, { fill: fill(isAst ? C.blue50 : C.teal50), font: { bold: true, color: { rgb: isAst ? C.blue700 : C.teal700 } }, alignment: { horizontal: 'center' }, border: border() });
+      return sc(count, { fill: fill(rowBg), font: { color: { rgb: C.slate600 } }, alignment: { horizontal: 'center' }, border: border() });
+    };
+
+    aoa.push([
+      aItem ? nameCell(fullName(aItem.cadre)) : sc('', { fill: fill(rowBg) }),
+      aItem ? numCell(aItem.count, true)       : sc('', { fill: fill(rowBg) }),
+      empty(),
+      pItem ? nameCell(fullName(pItem.cadre))  : sc('', { fill: fill(rowBg) }),
+      pItem ? numCell(pItem.count, false)       : sc('', { fill: fill(rowBg) }),
+    ]);
+  }
+
+  // ── Total row ──────────────────────────────────────────────────────────────
+  const totalAstCount  = astrRows.reduce((s, x) => s + x.count, 0);
+  const totalPermCount = permRows.reduce((s, x) => s + x.count, 0);
+  const totAst:  XStyle = { fill: fill(C.blue100),  font: { bold: true, color: { rgb: C.blue800  } }, alignment: { horizontal: 'center' }, border: border(C.blue200)  };
+  const totPerm: XStyle = { fill: fill(C.teal100),  font: { bold: true, color: { rgb: C.teal800  } }, alignment: { horizontal: 'center' }, border: border(C.teal200)  };
+  aoa.push([
+    sc('Total', { ...totAst,  alignment: { horizontal: 'left' } }),
+    sc(totalAstCount,  totAst),
+    empty(),
+    sc('Total', { ...totPerm, alignment: { horizontal: 'left' } }),
+    sc(totalPermCount, totPerm),
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']   = [{ width: 22 }, { width: 12 }, { width: 3 }, { width: 22 }, { width: 12 }];
+  ws['!merges'] = merges;
+  return ws;
+}
+
 export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: string) {
   const wb = XLSX.utils.book_new();
 
@@ -776,7 +877,11 @@ export async function exportToExcel(slots: Slot[], cadres: Cadre[], periodId?: s
         ruleDefault,      // 6: Cadres volontaires
       ];
       styleSimpleSheet(ws3, colRulesWishes);
-      XLSX.utils.book_append_sheet(wb, ws3, 'Vœux');
+      XLSX.utils.book_append_sheet(wb, ws3, 'Détail des vœux');
+
+      // ── Sheet: Nb de vœux par cadre ─────────────────────────────────────────
+      const wsWishCount = buildWishCountSheet(slots, rawCadres, wishMap);
+      XLSX.utils.book_append_sheet(wb, wsWishCount, 'Nb de vœux');
     }
   }
 
