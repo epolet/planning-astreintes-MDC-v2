@@ -101,6 +101,18 @@ export default function GeneratePlanning() {
 
   async function handleGenerate() {
     if (!activePeriod?.id || !vacations || !closedDays) return;
+
+    // Guard: if slots already exist (possibly with wishes and assignments),
+    // require explicit confirmation before wiping them.
+    if (slotCount > 0) {
+      const ok = confirm(
+        `Cette période contient déjà ${slotCount} créneau${slotCount > 1 ? 'x' : ''}.\n\n` +
+        `Regénérer les créneaux supprimera TOUTES les assignations et TOUS les vœux associés à cette période.\n\n` +
+        `Cette action est irréversible. Continuer ?`
+      );
+      if (!ok) return;
+    }
+
     setGenerating(true);
     setMessage(null);
     try {
@@ -616,11 +628,25 @@ export default function GeneratePlanning() {
                     <button
                       onClick={handleGenerate}
                       disabled={generating}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                      className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors shadow-sm ${
+                        slotCount > 0
+                          ? 'bg-amber-600 text-white hover:bg-amber-700'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
                     >
                       <Sparkles className="w-4 h-4" />
-                      {generating ? 'Generation en cours...' : 'Generer les creneaux'}
+                      {generating
+                        ? 'Generation en cours...'
+                        : slotCount > 0
+                          ? 'Regenerer les creneaux'
+                          : 'Generer les creneaux'}
                     </button>
+                    {slotCount > 0 && (
+                      <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                        Attention : régénérer effacera les {slotCount} créneaux existants, leurs assignations et leurs vœux.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
