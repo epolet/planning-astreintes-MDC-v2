@@ -91,21 +91,27 @@ export function generatePermanenceSlots(
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Hard cap: a cadre cannot receive more than this many astreinte weeks per year */
+/** Annual reference caps — all three are prorated by period duration. */
 export const MAX_ASTREINTES_PER_YEAR = 4;
+const MAX_PERM_PER_YEAR              = 6;
+const MAX_DIFF_PERM_PER_YEAR         = 4;  // D2+ (assez difficile et au-dessus)
+const DIFFICULT_PERM_MIN_DIFF        = 2;  // seuil "difficile" : D2 et au-dessus
 
-/** Annual caps for permanences */
-const MAX_PERM_PER_YEAR       = 6;
-const MAX_DIFF_PERM_PER_YEAR  = 4;  // D2+ (assez difficile et au-dessus)
-const DIFFICULT_PERM_MIN_DIFF = 2;  // seuil "difficile" : D2 et au-dessus
-
-/** Compute prorated caps for a given period duration (in days).
- *  Reference = 365 days. Rounds to nearest integer, minimum 1. */
-function proratedCaps(periodDays: number): { maxPerm: number; maxDiffPerm: number } {
+/**
+ * Compute prorated caps for a given period duration (in days).
+ * Reference = 365 days. Rounds to nearest integer, minimum 1.
+ *
+ * Examples (approximate):
+ *   6 months  (~182 d) → astreintes 2, perm 3, diffPerm 2
+ *   9 months  (~274 d) → astreintes 3, perm 5, diffPerm 3
+ *  12 months  (~365 d) → astreintes 4, perm 6, diffPerm 4
+ */
+function proratedCaps(periodDays: number): { maxAstreintes: number; maxPerm: number; maxDiffPerm: number } {
   const ratio = periodDays / 365;
   return {
-    maxPerm:     Math.max(1, Math.round(MAX_PERM_PER_YEAR     * ratio)),
-    maxDiffPerm: Math.max(1, Math.round(MAX_DIFF_PERM_PER_YEAR * ratio)),
+    maxAstreintes: Math.max(1, Math.round(MAX_ASTREINTES_PER_YEAR * ratio)),
+    maxPerm:       Math.max(1, Math.round(MAX_PERM_PER_YEAR       * ratio)),
+    maxDiffPerm:   Math.max(1, Math.round(MAX_DIFF_PERM_PER_YEAR  * ratio)),
   };
 }
 
@@ -168,7 +174,8 @@ function assignAstreinteSlots(
   countersP: Map<string, number[]>,
   vacations: VacationPeriod[],
   zone: string,
-  wishes: Map<string, string[]>
+  wishes: Map<string, string[]>,
+  maxAstreintes: number,
 ): Map<string, string[]> {
   const astreinteAssignedWeeks = new Map<string, string[]>();
 
@@ -197,8 +204,8 @@ function assignAstreinteSlots(
       else { slot.cadreId = null; slot.cadreName = ''; continue; }
     }
 
-    // Annual cap: exclude cadres who have reached MAX_ASTREINTES_PER_YEAR
-    const belowCap = eligible.filter(c => sumArr(countersA.get(c.id!) ?? [0, 0, 0, 0, 0]) < MAX_ASTREINTES_PER_YEAR);
+    // Prorated cap: exclude cadres who have reached the period's astreinte cap
+    const belowCap = eligible.filter(c => sumArr(countersA.get(c.id!) ?? [0, 0, 0, 0, 0]) < maxAstreintes);
     if (belowCap.length > 0) eligible = belowCap;
 
     // Outside Christmas: only cadres within 30 min are eligible
@@ -441,11 +448,11 @@ export function autoAssignSlots(
   const runPass2 = passes.weekends   ?? true;
   const runPass3 = passes.permanences ?? true;
 
-  // Prorated permanence caps based on period duration
+  // Prorated caps based on period duration (astreintes + permanences)
   const periodDays = (periodStart && periodEnd)
     ? (parseISO(periodEnd).getTime() - parseISO(periodStart).getTime()) / 86_400_000
     : 182; // fallback: ~6 months
-  const { maxPerm, maxDiffPerm } = proratedCaps(periodDays);
+  const { maxAstreintes, maxPerm, maxDiffPerm } = proratedCaps(periodDays);
 
   const activeCadres = cadres.filter(c => c.active);
   const astreinteCadres = activeCadres.filter(c => c.role === 'astreinte' || c.role === 'both');
@@ -480,7 +487,7 @@ export function autoAssignSlots(
   let astreinteAssignedWeeks: Map<string, string[]>;
   if (runPass1) {
     astreinteAssignedWeeks = assignAstreinteSlots(
-      astreinteSlots, astreinteCadres, activeCadres, countersA, countersP, vacations, zone, wishes
+      astreinteSlots, astreinteCadres, activeCadres, countersA, countersP, vacations, zone, wishes, maxAstreintes,
     );
   } else {
     astreinteAssignedWeeks = new Map();

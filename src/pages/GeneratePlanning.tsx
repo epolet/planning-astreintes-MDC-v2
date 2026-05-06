@@ -671,7 +671,7 @@ export default function GeneratePlanning() {
                         <p className="text-xs font-bold text-blue-800">📅 Phase 1 — Astreintes</p>
                         <p className="text-[11px] text-blue-700 leading-relaxed flex-1">
                           Efface les astreintes auto et réassigne chaque semaine au cadre
-                          volontaire ayant le plus faible compteur (plafond {4}/an).
+                          volontaire ayant le plus faible compteur (plafond proraté selon la durée de la période).
                         </p>
                         <button
                           onClick={handleAssignAstreintes}
