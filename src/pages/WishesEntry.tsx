@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { parseISO, getISOWeek } from 'date-fns';
 import { usePeriod } from '../context/PeriodContext';
 import { getCadres } from '../db/cadres';
@@ -20,30 +21,43 @@ interface MultiSelectProps {
 function CadreMultiSelect({ options, selected, onChange }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [openUpward, setOpenUpward] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Close on outside click
+  // Close on outside click or scroll
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
+    function handleClose(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         setSearch('');
       }
     }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    function handleScroll() { setOpen(false); setSearch(''); }
+    document.addEventListener('mousedown', handleClose);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClose);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
   }, []);
 
-  // Determine if dropdown should open upward based on available viewport space
   function handleToggle() {
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
+      const dropdownH = 320; // max height of dropdown
       const spaceBelow = window.innerHeight - rect.bottom;
-      // Dropdown height ≈ search bar (40px) + up to 8 items × 36px = ~328px, capped at 280px
-      setOpenUpward(spaceBelow < 300);
+      const openUpward = spaceBelow < dropdownH && rect.top > dropdownH;
+      setDropdownStyle({
+        position: 'fixed',
+        left: rect.left,
+        width: 256,
+        zIndex: 9999,
+        ...(openUpward
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+      });
     }
     if (open) setSearch('');
     setOpen(o => !o);
@@ -60,6 +74,65 @@ function CadreMultiSelect({ options, selected, onChange }: MultiSelectProps) {
   const filtered = search.trim()
     ? options.filter(c => fullName(c).toLowerCase().includes(search.toLowerCase()))
     : options;
+
+  const dropdown = open ? (
+    <div
+      style={dropdownStyle}
+      className="bg-white rounded-xl border border-slate-200 shadow-xl"
+    >
+      {/* Search input */}
+      <div className="p-2 border-b border-slate-100">
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-200 transition-all">
+          <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+          <input
+            ref={searchRef}
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Rechercher…"
+            className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="text-slate-400 hover:text-slate-600 text-xs leading-none"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Options list */}
+      <div className="py-1 max-h-60 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="px-3 py-3 text-xs text-slate-400 text-center">Aucun résultat</p>
+        ) : (
+          filtered.map(cadre => {
+            const checked = selected.has(cadre.id!);
+            return (
+              <button
+                key={cadre.id}
+                type="button"
+                onClick={() => onChange(cadre.id!, !checked)}
+                className={`flex items-center gap-2.5 w-full px-3 py-2 text-sm text-left transition-colors ${
+                  checked ? 'bg-blue-50 text-blue-800' : 'hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                {checked ? (
+                  <CheckSquare className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                ) : (
+                  <Square className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                )}
+                <span className="truncate">{fullName(cadre)}</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div ref={containerRef} className="relative min-w-[220px]">
@@ -83,65 +156,7 @@ function CadreMultiSelect({ options, selected, onChange }: MultiSelectProps) {
         <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
       </button>
 
-      {open && (
-        <div
-          className={`absolute z-50 w-64 bg-white rounded-xl border border-slate-200 shadow-xl ${
-            openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
-          }`}
-        >
-          {/* Search input */}
-          <div className="p-2 border-b border-slate-100">
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-200 transition-all">
-              <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-              <input
-                ref={searchRef}
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Rechercher…"
-                className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="text-slate-400 hover:text-slate-600 text-xs leading-none"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Options list */}
-          <div className="py-1 max-h-60 overflow-y-auto">
-            {filtered.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-slate-400 text-center">Aucun résultat</p>
-            ) : (
-              filtered.map(cadre => {
-                const checked = selected.has(cadre.id!);
-                return (
-                  <button
-                    key={cadre.id}
-                    type="button"
-                    onClick={() => onChange(cadre.id!, !checked)}
-                    className={`flex items-center gap-2.5 w-full px-3 py-2 text-sm text-left transition-colors ${
-                      checked ? 'bg-blue-50 text-blue-800' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    {checked ? (
-                      <CheckSquare className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                    )}
-                    <span className="truncate">{fullName(cadre)}</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+      {createPortal(dropdown, document.body)}
     </div>
   );
 }
