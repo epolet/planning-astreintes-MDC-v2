@@ -25,16 +25,24 @@ function CadreMultiSelect({ options, selected, onChange }: MultiSelectProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click or scroll
+  // Close on outside click or scroll (excluding the portal dropdown itself)
   useEffect(() => {
     function handleClose(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current && !containerRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
         setSearch('');
       }
     }
-    function handleScroll() { setOpen(false); setSearch(''); }
+    function handleScroll(e: Event) {
+      if (dropdownRef.current && dropdownRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+      setSearch('');
+    }
     document.addEventListener('mousedown', handleClose);
     window.addEventListener('scroll', handleScroll, true);
     return () => {
@@ -77,6 +85,7 @@ function CadreMultiSelect({ options, selected, onChange }: MultiSelectProps) {
 
   const dropdown = open ? (
     <div
+      ref={dropdownRef}
       style={dropdownStyle}
       className="bg-white rounded-xl border border-slate-200 shadow-xl"
     >
